@@ -1,10 +1,6 @@
-# fal.ai Blender Extension
+# fal.ai Official Blender Extension
 
 AI-powered 3D, materials, rendering, video, and audio — directly inside Blender.
-
-**Update: this package will soon be transferred to the `fal-ai` organization as the official fal blender extension!** Links will be posted when complete. 
-
-~Work in progress and not officially supported. If/when this is officially supported, the repository will be moved under fal's GitHub organization.~
 
 ---
 

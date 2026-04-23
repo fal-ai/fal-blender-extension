@@ -1,0 +1,43 @@
+schema_version = "1.0.0"
+
+id = "fal_ai"
+version = "0.1.0"
+name = "fal.ai — AI Generation Suite"
+tagline = "AI-powered textures, 3D models, rendering, video and audio"
+maintainer = "fal.ai <extensions@fal.ai>"
+type = "add-on"
+website = "https://fal.ai"
+tags = ["3D View", "Material", "Mesh", "Import-Export", "Render"]
+
+blender_version_min = "4.2.0"
+
+# Used with: blender --command extension build --split-platforms (see Makefile package-split).
+platforms = ["windows-x64", "windows-arm64", "macos-x64", "macos-arm64", "linux-x64"]
+
+license = [
+    "SPDX:GPL-3.0-or-later",
+]
+copyright = [
+    "2026 Features and Labels, Inc.",
+]
+
+# Wheel paths are filled by: make sync-manifest (from wheels/*.whl)
+wheels = [
+]
+
+[permissions]
+network = "Connect to fal.ai API for AI generation"
+files = "Save generated textures, models, and audio to disk"
+
+[build]
+paths_exclude_pattern = [
+    "__pycache__/",
+    ".*",
+    "*.zip",
+    "dist/",
+    "Makefile",
+    "blender_manifest.toml.template",
+    "scripts/",
+    "tests/",
+    "*.md",
+]

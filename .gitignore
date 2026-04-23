@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+*.zip
+.venv/
+.env
+# Generated from blender_manifest.toml.template (make sync-manifest)
+blender_manifest.toml
+# No wheels
+wheels/
+# Vendored pip packages (installed locally, not committed)
+vendor/*
+!vendor/.gitkeep

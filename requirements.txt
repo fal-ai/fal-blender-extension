@@ -1,0 +1,12 @@
+fal-client
+httpx
+httpx-sse
+httpcore
+certifi
+idna
+sniffio
+anyio
+h11
+websockets
+pillow
+msgpack

@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install pytest
+      
+      - name: Run unit tests
+        run: |
+          # Run from temp dir to avoid bpy import issues
+          cp tests/test_models.py /tmp/test_models.py
+          python -m pytest /tmp/test_models.py -v
+
+  # Integration tests with Blender
+  # Uncomment when ready to add Blender to CI
+  # integration-tests:
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     matrix:
+  #       blender-version: ['4.2', '5.0']
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     
+  #     - name: Set up Blender
+  #       run: |
+  #         sudo snap install blender --channel=${{ matrix.blender-version }}/stable --classic
+  #     
+  #     - name: Install extension
+  #       run: |
+  #         mkdir -p ~/.config/blender/${{ matrix.blender-version }}/extensions/user_default
+  #         cp -r . ~/.config/blender/${{ matrix.blender-version }}/extensions/user_default/fal_ai
+  #     
+  #     - name: Run integration tests
+  #       run: blender --background --python tests/test_blender_integration.py

@@ -2,8 +2,6 @@
 
 AI-powered 3D, materials, rendering, video, and audio — directly inside Blender.
 
----
-
 ## Quick Start
 
 1. Install the addon (see [Installation](#installation)) - supports Blender 4.2 and up on all platforms
@@ -332,7 +330,7 @@ Every workflow has a collapsible **Advanced Parameters** section that lets you s
 
 ### From Release
 
-1. Download the latest `.zip` from Releases
+1. Download the latest `.zip` from [Releases](https://github.com/fal-ai/fal-blender-extension/releases)
 2. Open Blender, then either a.) use `Edit → Preferences → Add-ons → Install from Disk`, then select the `.zip` file, or b.) drag and drop the `.zip` into the interface anywhere
 3. Set your API key in the addon preferences
 

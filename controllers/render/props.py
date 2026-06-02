@@ -181,6 +181,167 @@ class FalRenderPropertyGroup(bpy.types.PropertyGroup):
         ),
     )
 
+    # ── Refine: CNS Sampling (FLUX.2 Klein only) ────────────────────────
+    enable_cns: bpy.props.BoolProperty(
+        name="Enable CNS",
+        description=(
+            "Enable Colored Noise Sampling (CNS), a stochastic SDE sampler. Off "
+            "by default; when enabled the CNS parameters below take effect"
+        ),
+        default=False,
+    )
+
+    cns_s_churn: bpy.props.FloatProperty(
+        name="CNS Noise Strength",
+        description=(
+            "How much stochastic (colored) noise is injected after each step. "
+            "0 = CNS off, i.e. pure deterministic flow-matching (identical to "
+            "normal Klein); higher = more stochasticity. Turn this first; the "
+            "other CNS parameters only matter when it is > 0"
+        ),
+        default=0.5,
+        min=0.0,
+        max=2.0,
+        step=5,
+        precision=2,
+    )
+
+    cns_gamma_source: bpy.props.EnumProperty(
+        name="CNS Gamma Source",
+        description=(
+            "Where the per-frequency progress signal gamma(f, t) comes from. "
+            "'Approximation' is self-contained but uniform across bands, so the "
+            "frequency shaping comes entirely from the alpha-tilt parameters. "
+            "'Matrix' uses the precomputed per-band gamma for true spectral-"
+            "bias-aware coloring (more noise to genuinely under-resolved bands)"
+        ),
+        items=[
+            (
+                "matrix",
+                "Matrix",
+                "Precomputed per-band gamma for spectral-bias-aware coloring",
+            ),
+            (
+                "approximation",
+                "Approximation",
+                "Self-contained, uniform gamma across frequency bands",
+            ),
+        ],
+        default="matrix",
+    )
+
+    cns_power_gamma: bpy.props.FloatProperty(
+        name="CNS Power Gamma",
+        description=(
+            "Exponent on the residual (1 - gamma). Higher concentrates noise "
+            "more aggressively on unresolved bands; lower is gentler and "
+            "flatter. No effect under 'Approximation', where gamma is uniform"
+        ),
+        default=0.75,
+        min=0.1,
+        max=3.0,
+        step=5,
+        precision=2,
+    )
+
+    cns_gamma_divider: bpy.props.FloatProperty(
+        name="CNS Gamma Divider",
+        description=(
+            "Divides gamma first, weakening the coloring (pushing it toward "
+            "uniform white noise). Paper uses 1.73 for distilled/unguided and "
+            "25.0 for CFG/base, so raise this for the /base (CFG) endpoints"
+        ),
+        default=1.73,
+        min=0.1,
+        max=50.0,
+        step=10,
+        precision=2,
+    )
+
+    cns_alpha_tilt_start: bpy.props.FloatProperty(
+        name="CNS Alpha Tilt Start",
+        description=(
+            "Frequency tilt at the start of sampling, interpolated toward the "
+            "end value over steps. Positive boosts high frequencies (fine "
+            "texture/detail); negative boosts low frequencies (structure)"
+        ),
+        default=0.15,
+        min=-2.0,
+        max=2.0,
+        step=5,
+        precision=2,
+    )
+
+    cns_alpha_tilt_end: bpy.props.FloatProperty(
+        name="CNS Alpha Tilt End",
+        description=(
+            "Frequency tilt at the end of sampling. Positive boosts high "
+            "frequencies (fine texture/detail); negative boosts low frequencies "
+            "(structure). The default favors low-frequency structure at the end"
+        ),
+        default=-0.5,
+        min=-2.0,
+        max=2.0,
+        step=5,
+        precision=2,
+    )
+
+    cns_alpha_use_fnorm: bpy.props.BoolProperty(
+        name="CNS Frequency-Weighted Tilt",
+        description=(
+            "Use a smooth, frequency-position-weighted tilt (exp(alpha * f)) "
+            "instead of a flat (1 + alpha) multiplier"
+        ),
+        default=True,
+    )
+
+    cns_alpha_exp_interp: bpy.props.BoolProperty(
+        name="CNS Exponential Tilt Interpolation",
+        description=(
+            "Use an exponential (vs linear) curve for the start-to-end tilt "
+            "transition across sampling steps"
+        ),
+        default=True,
+    )
+
+    cns_alpha_exp_sharpness: bpy.props.FloatProperty(
+        name="CNS Exponential Tilt Sharpness",
+        description=(
+            "How sharp the exponential tilt-interpolation curve is. Only used "
+            "when exponential interpolation is enabled"
+        ),
+        default=0.75,
+        min=0.1,
+        max=10.0,
+        step=5,
+        precision=2,
+    )
+
+    cns_num_freq_bins: bpy.props.IntProperty(
+        name="CNS Frequency Bins",
+        description=(
+            "How many radial frequency bands the spectrum is split into. More "
+            "bands = finer-grained coloring"
+        ),
+        default=32,
+        min=8,
+        max=128,
+    )
+
+    cns_energy_scale: bpy.props.FloatProperty(
+        name="CNS Energy Scale",
+        description=(
+            "Global multiplier on the injected colored noise after variance "
+            "normalisation. <1 slightly damps the kick, >1 amplifies it "
+            "(paper: 0.98 unguided, 0.998 guided)"
+        ),
+        default=0.98,
+        min=0.5,
+        max=1.5,
+        step=1,
+        precision=3,
+    )
+
     # ── Video: Depth Endpoint ───────────────────────────────────────────
     depth_video_endpoint: bpy.props.EnumProperty(
         name="Depth Endpoint",

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, ClassVar
 
 from ..base import VisualFalModel
 
@@ -120,12 +120,56 @@ class FLUX1Dev(VisualFalModel):
 
 
 class FLUX2Klein9B(VisualFalModel):
-    """FLUX.2 Klein 9B image generation model."""
+    """FLUX.2 Klein 9B image generation model.
+
+    Supports Colored Noise Sampling (CNS), a stochastic SDE sampler that is
+    off by default. When enabled (``enable_cns``), the ``cns_*`` knobs shape
+    how much colored noise is injected per step and how it's distributed
+    across frequency bands. CNS payload fields are only emitted when CNS is
+    enabled so the endpoint keeps its deterministic defaults otherwise.
+    """
 
     display_name = "FLUX.2 Klein 9B"
     size_parameter = "image_size"
-    image_url_parameter = "image_urls"
+    image_urls_parameter = "image_urls"
     prompt_expansion_parameter = "enable_prompt_expansion"
+    supports_cns = True
+
+    # API defaults for CNS, mirrored by the UI props in controllers/render.
+    CNS_DEFAULTS: ClassVar[dict[str, Any]] = {
+        "cns_s_churn": 0.5,
+        "cns_gamma_source": "matrix",
+        "cns_power_gamma": 0.75,
+        "cns_gamma_divider": 1.73,
+        "cns_alpha_tilt_start": 0.15,
+        "cns_alpha_tilt_end": -0.5,
+        "cns_alpha_use_fnorm": True,
+        "cns_alpha_exp_interp": True,
+        "cns_alpha_exp_sharpness": 0.75,
+        "cns_num_freq_bins": 32,
+        "cns_energy_scale": 0.98,
+    }
+
+    @classmethod
+    def _get_cns_parameters(cls, **kwargs: Any) -> dict[str, Any]:
+        """Build the CNS payload, or nothing when CNS is disabled.
+
+        Returning an empty dict when CNS is disabled lets the endpoint fall
+        back to pure deterministic flow-matching (normal Klein).
+        """
+        if not kwargs.get("enable_cns", False):
+            return {}
+        params: dict[str, Any] = {"enable_cns": True}
+        for key, default in cls.CNS_DEFAULTS.items():
+            params[key] = kwargs.get(key, default)
+        return params
+
+    @classmethod
+    def parameters(cls, **kwargs: Any) -> dict[str, Any]:
+        """Return base parameters plus the optional CNS sampling payload."""
+        params = super().parameters(**kwargs)
+        params.update(cls._get_cns_parameters(**kwargs))
+        return params
 
 
 class GPTImage15(VisualFalModel):

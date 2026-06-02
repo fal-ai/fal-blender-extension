@@ -195,6 +195,7 @@ class FalRenderOperator(FalOperator):
         self._canny_frames: list = []
         self._parallel_threads = 0
         self._advanced_params = get_advanced_params_dict(props)
+        self._cns_kwargs: dict[str, Any] = {}
 
         if self._render_type == "IMAGE":
             self._mode = props.mode
@@ -216,6 +217,23 @@ class FalRenderOperator(FalOperator):
             self._refine_system_prompt = props.refine_system_prompt
             self._enable_labels = props.enable_labels
             self._auto_label = props.auto_label
+
+            # CNS sampling knobs (consumed only by models that support CNS,
+            # e.g. FLUX.2 Klein; ignored by every other refine model).
+            self._cns_kwargs = {
+                "enable_cns": props.enable_cns,
+                "cns_s_churn": props.cns_s_churn,
+                "cns_gamma_source": props.cns_gamma_source,
+                "cns_power_gamma": props.cns_power_gamma,
+                "cns_gamma_divider": props.cns_gamma_divider,
+                "cns_alpha_tilt_start": props.cns_alpha_tilt_start,
+                "cns_alpha_tilt_end": props.cns_alpha_tilt_end,
+                "cns_alpha_use_fnorm": props.cns_alpha_use_fnorm,
+                "cns_alpha_exp_interp": props.cns_alpha_exp_interp,
+                "cns_alpha_exp_sharpness": props.cns_alpha_exp_sharpness,
+                "cns_num_freq_bins": props.cns_num_freq_bins,
+                "cns_energy_scale": props.cns_energy_scale,
+            }
 
             # Setup scene for the render
             try:
@@ -765,6 +783,7 @@ class FalRenderOperator(FalOperator):
             width=self._render_w,
             height=self._render_h,
             seed=self._seed if self._seed >= 0 else None,
+            **self._cns_kwargs,
         )
         args = self._merge_advanced_params(args)
 

@@ -1,4 +1,9 @@
-from ...models import MaterialGenerationModel, PBREstimationModel, TilingTextureModel
+from ...models import (
+    MaterialExtractionModel,
+    MaterialGenerationModel,
+    PBREstimationModel,
+    TilingTextureModel,
+)
 from ..base import FalController
 from ..ui import FalControllerPanel
 from .operator import FalMaterialOperator
@@ -19,11 +24,13 @@ class FalMaterialController(FalController):
             "full_endpoint",
             "tiling_endpoint",
             "pbr_endpoint",
+            "extract_endpoint",
             "prompt",
             "enable_prompt_expansion",
             "image_source",
             "image_path",
             "texture",
+            "strength",
             "width",
             "height",
             "tiling_mode",
@@ -35,19 +42,27 @@ class FalMaterialController(FalController):
             "full_endpoint": lambda ctx, props: props.mode == "FULL",
             "tiling_endpoint": lambda ctx, props: props.mode == "TILING_ONLY",
             "pbr_endpoint": lambda ctx, props: props.mode == "PBR_ONLY",
-            "prompt": lambda ctx, props: props.mode in ("FULL", "TILING_ONLY"),
+            "extract_endpoint": lambda ctx, props: props.mode == "EXTRACT",
+            "prompt": lambda ctx, props: props.mode
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
             "enable_prompt_expansion": lambda ctx, props: props.mode
-            in ("FULL", "TILING_ONLY"),
-            "image_source": lambda ctx, props: props.mode == "PBR_ONLY",
-            "image_path": lambda ctx, props: props.mode == "PBR_ONLY"
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
+            "image_source": lambda ctx, props: props.mode in ("PBR_ONLY", "EXTRACT"),
+            "image_path": lambda ctx, props: props.mode in ("PBR_ONLY", "EXTRACT")
             and props.image_source == "FILE",
-            "texture": lambda ctx, props: props.mode == "PBR_ONLY"
+            "texture": lambda ctx, props: props.mode in ("PBR_ONLY", "EXTRACT")
             and props.image_source == "TEXTURE",
-            "width": lambda ctx, props: props.mode in ("FULL", "TILING_ONLY"),
-            "height": lambda ctx, props: props.mode in ("FULL", "TILING_ONLY"),
-            "tiling_mode": lambda ctx, props: props.mode in ("FULL", "TILING_ONLY"),
-            "upscale_factor": lambda ctx, props: props.mode in ("FULL", "PBR_ONLY"),
-            "seed": lambda ctx, props: props.mode in ("FULL", "TILING_ONLY"),
+            "strength": lambda ctx, props: props.mode == "EXTRACT",
+            "width": lambda ctx, props: props.mode
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
+            "height": lambda ctx, props: props.mode
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
+            "tiling_mode": lambda ctx, props: props.mode
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
+            "upscale_factor": lambda ctx, props: props.mode
+            in ("FULL", "PBR_ONLY", "EXTRACT"),
+            "seed": lambda ctx, props: props.mode
+            in ("FULL", "TILING_ONLY", "EXTRACT"),
         },
         field_groupings=[
             {"width", "height"},
@@ -57,5 +72,6 @@ class FalMaterialController(FalController):
             "full_endpoint": MaterialGenerationModel,
             "tiling_endpoint": TilingTextureModel,
             "pbr_endpoint": PBREstimationModel,
+            "extract_endpoint": MaterialExtractionModel,
         },
     )

@@ -25,6 +25,21 @@ def _show_refine_system_prompt(context, props) -> bool:
     return getattr(model_cls, "supports_system_prompt", True)
 
 
+def _show_cns_toggle(context, props) -> bool:
+    """Show the CNS toggle only for refine models that support CNS sampling."""
+    if props.render_type != "IMAGE" or props.mode != "REFINE":
+        return False
+    model_cls = REFINE_MODELS.get(props.refine_endpoint)
+    if model_cls is None:
+        return False
+    return getattr(model_cls, "supports_cns", False)
+
+
+def _show_cns_params(context, props) -> bool:
+    """Show the individual CNS knobs only once CNS is enabled."""
+    return _show_cns_toggle(context, props) and props.enable_cns
+
+
 def _is_image(context, props) -> bool:
     return props.render_type == "IMAGE"
 
@@ -73,6 +88,18 @@ class FalRenderController(FalController):
             "refine_endpoint",
             "refine_strength",
             "refine_system_prompt",
+            "enable_cns",
+            "cns_s_churn",
+            "cns_gamma_source",
+            "cns_power_gamma",
+            "cns_gamma_divider",
+            "cns_alpha_tilt_start",
+            "cns_alpha_tilt_end",
+            "cns_alpha_use_fnorm",
+            "cns_alpha_exp_interp",
+            "cns_alpha_exp_sharpness",
+            "cns_num_freq_bins",
+            "cns_energy_scale",
             # Video-specific
             "video_mode",
             "depth_video_endpoint",
@@ -119,6 +146,18 @@ class FalRenderController(FalController):
             "refine_endpoint": _image_mode("REFINE"),
             "refine_strength": _image_mode("REFINE"),
             "refine_system_prompt": _show_refine_system_prompt,
+            "enable_cns": _show_cns_toggle,
+            "cns_s_churn": _show_cns_params,
+            "cns_gamma_source": _show_cns_params,
+            "cns_power_gamma": _show_cns_params,
+            "cns_gamma_divider": _show_cns_params,
+            "cns_alpha_tilt_start": _show_cns_params,
+            "cns_alpha_tilt_end": _show_cns_params,
+            "cns_alpha_use_fnorm": _show_cns_params,
+            "cns_alpha_exp_interp": _show_cns_params,
+            "cns_alpha_exp_sharpness": _show_cns_params,
+            "cns_num_freq_bins": _show_cns_params,
+            "cns_energy_scale": _show_cns_params,
             # Video mode endpoints
             "depth_video_endpoint": _video_mode("DEPTH"),
             "edge_video_endpoint": _video_mode("EDGE"),

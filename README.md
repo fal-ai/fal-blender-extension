@@ -69,6 +69,14 @@ Generate a complete tiling PBR material from a text prompt.
 |----------|-------|
 | [PATINA Material](https://fal.ai/models/fal-ai/patina/material) | Generates base color + all PBR maps from a prompt |
 
+#### Extract from Photo
+
+Extract a seamless, tileable material with the full PBR stack from a photo. Point it at a wall, floor, or fabric photo, describe which surface to extract, and it returns a tiling base color plus all PBR maps applied to the selected object.
+
+| Endpoint | Notes |
+|----------|-------|
+| [PATINA Material Extract](https://fal.ai/models/fal-ai/patina/material/extract) | Extracts a tileable material + PBR maps from a photo (prompt + image) |
+
 #### Image-to-Maps
 
 Estimate PBR maps (roughness, normal, displacement, metalness) from an existing base-color image. Useful when you already have a texture and want the rest of the stack.

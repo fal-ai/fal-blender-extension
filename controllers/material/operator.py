@@ -4,13 +4,19 @@ import bpy  # type: ignore[import-not-found]
 
 from ...importers import import_image_as_texture
 from ...job_queue import FalJob, JobManager
-from ...models import MaterialGenerationModel, PBREstimationModel, TilingTextureModel
-from ...utils import download_file
+from ...models import (
+    MaterialExtractionModel,
+    MaterialGenerationModel,
+    PBREstimationModel,
+    TilingTextureModel,
+)
+from ...utils import download_file, upload_blender_image, upload_file
 from ..operators import FalOperator
 
 TILING_MODELS = TilingTextureModel.catalog()
 PBR_MODELS = PBREstimationModel.catalog()
 MATERIAL_MODELS = MaterialGenerationModel.catalog()
+EXTRACT_MODELS = MaterialExtractionModel.catalog()
 
 PBR_MAP_NAMES = ("basecolor", "normal", "roughness", "metalness", "height")
 PBR_DOWNLOAD_KEYS = [f"images.{i}.url" for i in range(len(PBR_MAP_NAMES) + 1)]
@@ -28,9 +34,14 @@ class FalMaterialOperator(FalOperator):
         """Check whether the operator can be invoked given current property state."""
         if props.mode in ("FULL", "TILING_ONLY"):
             return bool(props.prompt.strip())
-        if props.image_source == "FILE":
-            return bool(props.image_path.strip())
-        return props.texture is not None
+        has_image = (
+            bool(props.image_path.strip())
+            if props.image_source == "FILE"
+            else props.texture is not None
+        )
+        if props.mode == "EXTRACT":
+            return bool(props.prompt.strip()) and has_image
+        return has_image
 
     def __call__(
         self,
@@ -42,6 +53,8 @@ class FalMaterialOperator(FalOperator):
         """Dispatch material generation based on the selected mode."""
         if props.mode == "FULL":
             return self._full_pipeline(context, props)
+        elif props.mode == "EXTRACT":
+            return self._extract_from_photo(context, props)
         elif props.mode == "PBR_ONLY":
             return self._pbr_only(context, props)
         return self._tiling_only(context, props)
@@ -81,6 +94,58 @@ class FalMaterialOperator(FalOperator):
         )
         JobManager.get().submit(job)
         self.report({"INFO"}, "Generating material...")
+        return {"FINISHED"}
+
+    # ── Extract from Photo ─────────────────────────────────────────────
+
+    def _extract_from_photo(
+        self, context: bpy.types.Context, props: bpy.types.PropertyGroup
+    ) -> set[str]:
+        """Extract a tileable material with PBR maps from a photo."""
+        try:
+            if props.image_source == "FILE":
+                image_url = upload_file(bpy.path.abspath(props.image_path))
+            else:
+                img = props.texture
+                if not img:
+                    self.report({"ERROR"}, "No texture selected")
+                    return {"CANCELLED"}
+                image_url = upload_blender_image(img)
+        except RuntimeError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+
+        model = EXTRACT_MODELS[props.extract_endpoint]
+        seed = props.seed if props.seed >= 0 else None
+        params = model.parameters(
+            prompt=props.prompt,
+            image_url=image_url,
+            width=props.width,
+            height=props.height,
+            seed=seed,
+            enable_prompt_expansion=props.enable_prompt_expansion,
+            output_format=props.output_format,
+            tiling_mode=props.tiling_mode,
+            upscale_factor=props.upscale_factor,
+            strength=props.strength,
+        )
+        params = self.with_advanced_params(params, props)
+
+        target_obj_name = context.active_object.name if context.active_object else None
+        prompt_short = props.prompt[:20]
+
+        def on_complete(job: FalJob):
+            _handle_pbr_result(job, target_obj_name, f"fal_{prompt_short}")
+
+        job = FalJob(
+            endpoint=model.endpoint,
+            arguments=params,
+            on_complete=on_complete,
+            download_keys=PBR_DOWNLOAD_KEYS,
+            label=f"Extract: {prompt_short}...",
+        )
+        JobManager.get().submit(job)
+        self.report({"INFO"}, "Extracting material from photo...")
         return {"FINISHED"}
 
     # ── PBR Only ───────────────────────────────────────────────────────

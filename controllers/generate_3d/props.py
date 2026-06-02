@@ -229,3 +229,207 @@ class FalGenerate3DPropertyGroup(bpy.types.PropertyGroup):
         ],
         default="original_image",
     )
+
+    # ── Hyper3D Rodin v2.5 ─────────────────────────────────────────────────
+    # Rodin exposes every control as a dedicated, prefixed property so it can
+    # coexist with the shared knobs above. See ``RodinV25Model`` for how each
+    # maps to the API.
+
+    rodin_tier: bpy.props.EnumProperty(
+        name="Tier",
+        description=(
+            "Generation tier. Higher tiers produce more detailed meshes but "
+            "cost more. Extreme-High bills at double the base rate"
+        ),
+        items=[
+            ("Gen-2.5-Extreme-Low", "Extreme Low", "Fastest, lowest detail"),
+            ("Gen-2.5-Low", "Low", "Low detail"),
+            ("Gen-2.5-Medium", "Medium", "Balanced detail (default)"),
+            ("Gen-2.5-High", "High", "High detail"),
+            (
+                "Gen-2.5-Extreme-High",
+                "Extreme High",
+                "Highest detail (double cost)",
+            ),
+        ],
+        default="Gen-2.5-Medium",
+    )
+
+    rodin_geometry_file_format: bpy.props.EnumProperty(
+        name="File Format",
+        description="Format of the generated geometry file",
+        items=[
+            ("glb", "GLB", "glTF binary (recommended for import)"),
+            ("usdz", "USDZ", "Universal Scene Description"),
+            ("fbx", "FBX", "Autodesk FBX"),
+            ("obj", "OBJ", "Wavefront OBJ"),
+            ("stl", "STL", "Stereolithography"),
+        ],
+        default="glb",
+    )
+
+    rodin_material: bpy.props.EnumProperty(
+        name="Material",
+        description=(
+            "Material type. PBR: physically-based; Shaded: baked lighting; "
+            "All: both; None: geometry only"
+        ),
+        items=[
+            ("PBR", "PBR", "Physically-based materials"),
+            ("Shaded", "Shaded", "Baked lighting, no PBR maps"),
+            ("All", "All", "Both PBR and Shaded variants"),
+            ("None", "None", "Geometry only, no textures"),
+        ],
+        default="All",
+    )
+
+    rodin_quality_mesh_option: bpy.props.EnumProperty(
+        name="Quality / Mesh",
+        description=(
+            "Combined quality and topology. Quad = smooth surfaces, "
+            "Triangle = detailed geometry. Valid face counts depend on tier"
+        ),
+        items=[
+            ("4K Quad", "4K Quad", ""),
+            ("8K Quad", "8K Quad", ""),
+            ("18K Quad", "18K Quad", "Default"),
+            ("50K Quad", "50K Quad", ""),
+            ("100K Quad", "100K Quad", ""),
+            ("200K Quad", "200K Quad", ""),
+            ("2K Triangle", "2K Triangle", ""),
+            ("20K Triangle", "20K Triangle", ""),
+            ("150K Triangle", "150K Triangle", ""),
+            ("500K Triangle", "500K Triangle", ""),
+            ("1M Triangle", "1M Triangle", ""),
+            ("2M Triangle", "2M Triangle", "High/Extreme-High tiers only"),
+        ],
+        default="18K Quad",
+    )
+
+    rodin_texture_mode: bpy.props.EnumProperty(
+        name="Texture Mode",
+        description=(
+            "Texture generation quality. Leave on Auto to let the API pick a "
+            "default appropriate for the tier"
+        ),
+        items=[
+            ("NONE", "Auto", "Let the API choose"),
+            ("legacy", "Legacy", ""),
+            ("extreme-low", "Extreme Low", ""),
+            ("low", "Low", ""),
+            ("medium", "Medium", ""),
+            ("high", "High", ""),
+        ],
+        default="NONE",
+    )
+
+    rodin_geometry_instruct_mode: bpy.props.EnumProperty(
+        name="Geometry Mode",
+        description=(
+            "Faithful follows the prompt/input closely; creative permits more "
+            "variation. Only effective on Medium and High tiers"
+        ),
+        items=[
+            ("faithful", "Faithful", "Follow input closely"),
+            ("creative", "Creative", "Allow more variation"),
+        ],
+        default="faithful",
+    )
+
+    rodin_is_symmetric: bpy.props.EnumProperty(
+        name="Symmetry",
+        description="Symmetry mode for the generated mesh",
+        items=[
+            ("symmetric", "Symmetric", "Force left-right symmetry"),
+            ("balanced", "Balanced", "Favor symmetry without enforcing it"),
+            ("asymmetric", "Asymmetric", "Allow freely asymmetric geometry"),
+            ("unknown", "Auto", "Let the model decide"),
+        ],
+        default="unknown",
+    )
+
+    rodin_hd_texture: bpy.props.BoolProperty(
+        name="HD Texture",
+        description="Enhanced texture post-processing for higher visual fidelity",
+        default=False,
+    )
+
+    rodin_texture_delight: bpy.props.BoolProperty(
+        name="Texture Delight",
+        description="Remove baked lighting/highlights from generated textures",
+        default=False,
+    )
+
+    rodin_is_micro: bpy.props.BoolProperty(
+        name="Micro Detail",
+        description=(
+            "Generate finer micro-scale geometric detail. Only effective with "
+            "the Extreme-High tier"
+        ),
+        default=False,
+    )
+
+    rodin_tapose: bpy.props.BoolProperty(
+        name="T/A-Pose",
+        description=(
+            "Generate characters in T-pose or A-pose, making them easier to "
+            "rig and animate"
+        ),
+        default=False,
+    )
+
+    rodin_high_pack: bpy.props.BoolProperty(
+        name="HighPack Add-on",
+        description=(
+            "4K resolution textures and high-poly geometry instead of the "
+            "default 2K. Adds extra cost per generation"
+        ),
+        default=False,
+    )
+
+    # Rodin image-to-3D only.
+    rodin_use_original_alpha: bpy.props.BoolProperty(
+        name="Use Original Alpha",
+        description="Preserve the transparency channel from input images",
+        default=False,
+    )
+
+    # Rodin image-to-3D only.
+    rodin_preview_render: bpy.props.BoolProperty(
+        name="Preview Render",
+        description="Generate a preview render image alongside the model files",
+        default=False,
+    )
+
+    # Rodin: optional bounding-box conditioning. The toggle gates the three
+    # dimension sliders below; ``RodinV25Model`` assembles them into the
+    # ``bbox_condition`` [width, height, length] array on submit.
+    rodin_use_bbox: bpy.props.BoolProperty(
+        name="Bounding Box",
+        description="Constrain output proportions to a bounding box",
+        default=False,
+    )
+
+    rodin_bbox_width: bpy.props.IntProperty(
+        name="BBox Width",
+        description="Bounding box width",
+        default=100,
+        min=1,
+        max=1000,
+    )
+
+    rodin_bbox_height: bpy.props.IntProperty(
+        name="BBox Height",
+        description="Bounding box height",
+        default=100,
+        min=1,
+        max=1000,
+    )
+
+    rodin_bbox_length: bpy.props.IntProperty(
+        name="BBox Length",
+        description="Bounding box length",
+        default=100,
+        min=1,
+        max=1000,
+    )

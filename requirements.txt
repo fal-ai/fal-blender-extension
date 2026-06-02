@@ -10,3 +10,5 @@ h11
 websockets
 pillow
 msgpack
+aiofiles
+asyncstdlib

@@ -53,6 +53,8 @@ from .mesh_generation import (
     ImageTo3DModel,
     MeshyV6PreviewImageTo3DModel,
     MeshyV6PreviewTextTo3DModel,
+    RodinV25ImageTo3DModel,
+    RodinV25TextTo3DModel,
     TextTo3DModel,
 )
 from .video_generation import (
@@ -160,6 +162,8 @@ __all__ = [
     "PBREstimationModel",
     "PatinaMaterialGenerationModel",
     "PatinaPBREstimationModel",
+    "RodinV25ImageTo3DModel",
+    "RodinV25TextTo3DModel",
     "SeedVR29BImageUpscalingModel",
     "SeedVR29BVideoUpscalingModel",
     "Seedance20FastImageToVideoModel",

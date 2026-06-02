@@ -5,6 +5,7 @@ from .base import (
     Hunyuan3DV31RapidModel,
     MeshGenerationModel,
     MeshyV6PreviewModel,
+    RodinV25Model,
     TripoH31Model,
     TripoP1Model,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "Hunyuan3DV31RapidImageTo3DModel",
     "TripoP1ImageTo3DModel",
     "TripoH31ImageTo3DModel",
+    "RodinV25ImageTo3DModel",
 ]
 
 
@@ -57,4 +59,19 @@ class TripoH31ImageTo3DModel(ImageTo3DModel, TripoH31Model):
         **TripoH31Model.ui_parameter_map,
         "orientation": "orientation",
         "texture_alignment": "texture_alignment",
+    }
+
+
+class RodinV25ImageTo3DModel(ImageTo3DModel, RodinV25Model):
+    """Hyper3D Rodin v2.5 image-to-3D model.
+
+    The image-to-3D endpoint lives at the Rodin v2.5 root and adds two
+    image-only controls on top of the shared Rodin parameters.
+    """
+
+    endpoint = "fal-ai/hyper3d/rodin/v2.5"
+    ui_parameter_map = {
+        **RodinV25Model.ui_parameter_map,
+        "rodin_use_original_alpha": "use_original_alpha",
+        "rodin_preview_render": "preview_render",
     }

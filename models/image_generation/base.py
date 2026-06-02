@@ -124,7 +124,7 @@ class FLUX2Klein9B(VisualFalModel):
 
     display_name = "FLUX.2 Klein 9B"
     size_parameter = "image_size"
-    image_url_parameter = "image_url"
+    image_url_parameter = "image_urls"
     prompt_expansion_parameter = "enable_prompt_expansion"
 
 
@@ -185,3 +185,4 @@ class Seedream5Lite(VisualFalModel):
 
     display_name = "Seedream 5 Lite"
     size_parameter = "image_size"
+    image_urls_parameter = "image_urls"

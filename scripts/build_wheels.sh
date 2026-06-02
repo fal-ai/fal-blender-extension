@@ -36,7 +36,7 @@ pip download \
     --only-binary :all: \
     --python-version 3.11 \
     --no-deps \
-    fal-client httpx httpx-sse httpcore certifi idna sniffio anyio h11
+    fal-client httpx httpx-sse httpcore certifi idna sniffio anyio h11 aiofiles asyncstdlib
 
 echo ""
 echo "=== Downloading platform-specific wheels (msgpack, Pillow, websockets) ==="

@@ -454,6 +454,111 @@ class TestMeshMixinMRO:
         assert M.ui_parameter_map == {"face_count": "target_polycount"}
 
 
+class TestRodinV25Parameters:
+    """Hyper3D Rodin v2.5 forwards plain enum/bool controls through the
+    generic ``ui_parameter_map`` machinery, but three controls need
+    post-processing: ``rodin_high_pack`` → ``addons``, the bbox toggle +
+    dimensions → ``bbox_condition``, and ``seed`` is clamped to 0–65535.
+
+    Runs here (bpy-free) against a local mirror of
+    ``models/mesh_generation/base.py::RodinV25Model.parameters`` — keep them
+    in sync when behavior changes."""
+
+    class _Rodin:
+        """Minimal mirror of MeshGenerationModel + RodinV25Model forwarding."""
+
+        seed_range: ClassVar[tuple[int, int]] = (0, 65535)
+        image_urls_parameter: ClassVar[str | None] = "image_urls"
+        ui_parameter_map: ClassVar[dict[str, str]] = {
+            "seed": "seed",
+            "rodin_tier": "tier",
+            "rodin_material": "material",
+            "rodin_texture_mode": "texture_mode",
+            "rodin_hd_texture": "hd_texture",
+            "rodin_high_pack": "addons",
+            "rodin_use_bbox": "bbox_condition",
+            "rodin_bbox_width": "bbox_condition",
+            "rodin_bbox_height": "bbox_condition",
+            "rodin_bbox_length": "bbox_condition",
+        }
+
+        @classmethod
+        def _forward(cls, **kwargs: Any) -> dict[str, Any]:
+            params: dict[str, Any] = {}
+            image_paths = []
+            if "image_path" in kwargs:
+                image_paths.append(kwargs["image_path"])
+            if cls.image_urls_parameter and image_paths:
+                params[cls.image_urls_parameter] = list(image_paths)
+            params["prompt"] = kwargs.get("prompt", "")
+            for ui_name, api_name in cls.ui_parameter_map.items():
+                if ui_name not in kwargs:
+                    continue
+                value = kwargs[ui_name]
+                if value is None:
+                    continue
+                if isinstance(value, str) and (not value.strip() or value == "NONE"):
+                    continue
+                params[api_name] = value
+            return params
+
+        @classmethod
+        def parameters(cls, **kwargs: Any) -> dict[str, Any]:
+            kwargs = dict(kwargs)
+            high_pack = kwargs.pop("rodin_high_pack", False)
+            use_bbox = kwargs.pop("rodin_use_bbox", False)
+            bbox = (
+                kwargs.pop("rodin_bbox_width", 0),
+                kwargs.pop("rodin_bbox_height", 0),
+                kwargs.pop("rodin_bbox_length", 0),
+            )
+            params = cls._forward(**kwargs)
+            seed = params.get("seed")
+            if seed is not None:
+                lo, hi = cls.seed_range
+                params["seed"] = max(lo, min(hi, int(seed)))
+            if high_pack:
+                params["addons"] = ["HighPack"]
+            if use_bbox:
+                params["bbox_condition"] = [int(v) for v in bbox]
+            return params
+
+    def test_high_pack_bool_becomes_addons_list(self):
+        assert self._Rodin.parameters(rodin_high_pack=True)["addons"] == ["HighPack"]
+        assert "addons" not in self._Rodin.parameters(rodin_high_pack=False)
+
+    def test_bbox_assembled_only_when_enabled(self):
+        off = self._Rodin.parameters(
+            rodin_use_bbox=False,
+            rodin_bbox_width=10,
+            rodin_bbox_height=20,
+            rodin_bbox_length=30,
+        )
+        assert "bbox_condition" not in off
+        on = self._Rodin.parameters(
+            rodin_use_bbox=True,
+            rodin_bbox_width=10,
+            rodin_bbox_height=20,
+            rodin_bbox_length=30,
+        )
+        assert on["bbox_condition"] == [10, 20, 30]
+
+    def test_seed_clamped_to_api_range(self):
+        assert self._Rodin.parameters(seed=999_999)["seed"] == 65535
+        assert self._Rodin.parameters(seed=42)["seed"] == 42
+
+    def test_texture_mode_auto_sentinel_dropped(self):
+        assert "texture_mode" not in self._Rodin.parameters(rodin_texture_mode="NONE")
+        assert (
+            self._Rodin.parameters(rodin_texture_mode="high")["texture_mode"] == "high"
+        )
+
+    def test_material_none_string_is_preserved(self):
+        # The API's "None" material (geometry only) must survive — it is a
+        # real value, distinct from the "NONE" auto/unset sentinel.
+        assert self._Rodin.parameters(rodin_material="None")["material"] == "None"
+
+
 if __name__ == "__main__":
     import pytest
 

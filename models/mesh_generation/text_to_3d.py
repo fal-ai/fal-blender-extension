@@ -5,6 +5,7 @@ from .base import (
     Hunyuan3DV31RapidModel,
     MeshGenerationModel,
     MeshyV6PreviewModel,
+    RodinV25Model,
     TripoH31Model,
     TripoP1Model,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "Hunyuan3DV31RapidTextTo3DModel",
     "TripoP1TextTo3DModel",
     "TripoH31TextTo3DModel",
+    "RodinV25TextTo3DModel",
 ]
 
 
@@ -57,3 +59,9 @@ class TripoH31TextTo3DModel(TextTo3DModel, TripoH31Model):
         **TripoH31Model.ui_parameter_map,
         "negative_prompt": "negative_prompt",
     }
+
+
+class RodinV25TextTo3DModel(TextTo3DModel, RodinV25Model):
+    """Hyper3D Rodin v2.5 text-to-3D model."""
+
+    endpoint = "fal-ai/hyper3d/rodin/v2.5/text-to-3d"

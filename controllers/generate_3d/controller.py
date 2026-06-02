@@ -62,6 +62,25 @@ class FalGenerate3DController(FalController):
             "auto_size",
             "orientation",
             "texture_alignment",
+            # Hyper3D Rodin v2.5
+            "rodin_tier",
+            "rodin_quality_mesh_option",
+            "rodin_material",
+            "rodin_texture_mode",
+            "rodin_geometry_instruct_mode",
+            "rodin_is_symmetric",
+            "rodin_geometry_file_format",
+            "rodin_hd_texture",
+            "rodin_texture_delight",
+            "rodin_is_micro",
+            "rodin_tapose",
+            "rodin_high_pack",
+            "rodin_use_original_alpha",
+            "rodin_preview_render",
+            "rodin_use_bbox",
+            "rodin_bbox_width",
+            "rodin_bbox_height",
+            "rodin_bbox_length",
             # Shared
             "face_count",
             "symmetry_mode",
@@ -87,6 +106,43 @@ class FalGenerate3DController(FalController):
             "auto_size": _endpoint_supports("auto_size"),
             "orientation": _endpoint_supports("orientation"),
             "texture_alignment": _endpoint_supports("texture_alignment"),
+            # Hyper3D Rodin v2.5
+            "rodin_tier": _endpoint_supports("rodin_tier"),
+            "rodin_quality_mesh_option": _endpoint_supports(
+                "rodin_quality_mesh_option"
+            ),
+            "rodin_material": _endpoint_supports("rodin_material"),
+            "rodin_texture_mode": _endpoint_supports("rodin_texture_mode"),
+            "rodin_geometry_instruct_mode": _endpoint_supports(
+                "rodin_geometry_instruct_mode"
+            ),
+            "rodin_is_symmetric": _endpoint_supports("rodin_is_symmetric"),
+            "rodin_geometry_file_format": _endpoint_supports(
+                "rodin_geometry_file_format"
+            ),
+            "rodin_hd_texture": _endpoint_supports("rodin_hd_texture"),
+            "rodin_texture_delight": _endpoint_supports("rodin_texture_delight"),
+            "rodin_is_micro": _endpoint_supports("rodin_is_micro"),
+            "rodin_tapose": _endpoint_supports("rodin_tapose"),
+            "rodin_high_pack": _endpoint_supports("rodin_high_pack"),
+            "rodin_use_original_alpha": _endpoint_supports(
+                "rodin_use_original_alpha"
+            ),
+            "rodin_preview_render": _endpoint_supports("rodin_preview_render"),
+            "rodin_use_bbox": _endpoint_supports("rodin_use_bbox"),
+            # Dimension sliders only show once bounding-box conditioning is on.
+            "rodin_bbox_width": lambda ctx, props: _endpoint_supports(
+                "rodin_bbox_width"
+            )(ctx, props)
+            and props.rodin_use_bbox,
+            "rodin_bbox_height": lambda ctx, props: _endpoint_supports(
+                "rodin_bbox_height"
+            )(ctx, props)
+            and props.rodin_use_bbox,
+            "rodin_bbox_length": lambda ctx, props: _endpoint_supports(
+                "rodin_bbox_length"
+            )(ctx, props)
+            and props.rodin_use_bbox,
             "face_count": _endpoint_supports("face_count"),
             "symmetry_mode": _endpoint_supports("symmetry_mode"),
             "pose_mode": _endpoint_supports("pose_mode"),

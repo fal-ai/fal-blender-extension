@@ -38,7 +38,9 @@ from .image_processing import (
     SeedVR29BImageUpscalingModel,
 )
 from .material_generation import (
+    MaterialExtractionModel,
     MaterialGenerationModel,
+    PatinaMaterialExtractionModel,
     PatinaMaterialGenerationModel,
     PatinaPBREstimationModel,
     PBREstimationModel,
@@ -148,6 +150,7 @@ __all__ = [
     "LTX2EdgeVideoModel",
     "LTX2ImageToVideoModel",
     "LTX2TextToVideoModel",
+    "MaterialExtractionModel",
     "MaterialGenerationModel",
     "MeshyV6PreviewImageTo3DModel",
     "MeshyV6PreviewTextTo3DModel",
@@ -160,6 +163,7 @@ __all__ = [
     "NanoBananaProSketchGuidedImageGenerationModel",
     "NanoBananaSketchGuidedImageGenerationModel",
     "PBREstimationModel",
+    "PatinaMaterialExtractionModel",
     "PatinaMaterialGenerationModel",
     "PatinaPBREstimationModel",
     "RodinV25ImageTo3DModel",

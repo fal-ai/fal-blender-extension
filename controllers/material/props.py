@@ -1,6 +1,11 @@
 import bpy  # type: ignore[import-not-found]
 
-from ...models import MaterialGenerationModel, PBREstimationModel, TilingTextureModel
+from ...models import (
+    MaterialExtractionModel,
+    MaterialGenerationModel,
+    PBREstimationModel,
+    TilingTextureModel,
+)
 from ..advanced_params import with_advanced_params
 
 
@@ -12,6 +17,7 @@ class FalMaterialPropertyGroup(bpy.types.PropertyGroup):
         name="Mode",
         items=[
             ("FULL", "Full Pipeline", "Generate tileable texture and extract PBR maps"),
+            ("EXTRACT", "Extract from Photo", "Extract a seamless tileable material with PBR maps from a photo"),
             ("PBR_ONLY", "PBR from Image", "Extract PBR maps from an existing image"),
             ("TILING_ONLY", "Tiling Texture", "Generate a tileable texture only"),
         ],
@@ -37,6 +43,13 @@ class FalMaterialPropertyGroup(bpy.types.PropertyGroup):
         name="PBR Model",
         items=PBREstimationModel.enumerate() or [("NONE", "No Models Available", "")],
         description="Model for PBR material map estimation",
+    )
+
+    extract_endpoint: bpy.props.EnumProperty(
+        name="Extract Model",
+        items=MaterialExtractionModel.enumerate()
+        or [("NONE", "No Models Available", "")],
+        description="Model for extracting a tileable material from a photo",
     )
 
     # ── Generation parameters ──────────────────────────────────────────
@@ -108,6 +121,15 @@ class FalMaterialPropertyGroup(bpy.types.PropertyGroup):
             ("4", "4x", "4x"),
         ],
         default="NONE",
+    )
+
+    strength: bpy.props.FloatProperty(
+        name="Strength",
+        description="How much to transform the input photo (higher = more stylized)",
+        default=0.6,
+        min=0.0,
+        max=1.0,
+        step=5,
     )
 
     # ── PBR-only image source ──────────────────────────────────────────

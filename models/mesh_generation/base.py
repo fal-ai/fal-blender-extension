@@ -8,6 +8,7 @@ from ..base import FalModel
 __all__ = [
     "MeshyV6PreviewModel",
     "RodinV25Model",
+    "TripoSplatModel",
 ]
 
 
@@ -244,3 +245,29 @@ class RodinV25Model(MeshGenerationModel):
             params["bbox_condition"] = [int(v) for v in bbox]
 
         return params
+
+
+class TripoSplatModel(MeshGenerationModel):
+    """TripoSplat image-to-Gaussian-splat model base.
+
+    Unlike every other mesh endpoint, TripoSplat returns a 3D Gaussian splat
+    (a ``.ply`` of Gaussians) rather than a triangle mesh, so the operator
+    routes its result through ``import_splat`` instead of ``import_glb``. We
+    always request PLY output (``static_parameters``) because that's the format
+    the splat importer parses.
+
+    The endpoint takes no text prompt, so ``prompt_parameter`` is unset to keep
+    the generic ``parameters()`` forwarder from emitting an empty ``prompt``.
+    """
+
+    display_name = "TripoSplat (Gaussian Splat)"
+    image_url_parameter = "image_url"
+    # No prompt field on this endpoint — don't emit one.
+    prompt_parameter = None
+    static_parameters: ClassVar[dict[str, Any]] = {"output_format": "ply"}
+    ui_parameter_map: ClassVar[dict[str, str]] = {
+        "num_gaussians": "num_gaussians",
+        "num_inference_steps": "num_inference_steps",
+        "guidance_scale": "guidance_scale",
+        "seed": "seed",
+    }

@@ -6,9 +6,9 @@ import urllib.request
 
 import bpy
 
-from ...importers import import_glb, import_obj
+from ...importers import import_glb, import_obj, import_splat
 from ...job_queue import FalJob, JobManager
-from ...models import ImageTo3DModel, TextTo3DModel
+from ...models import ImageTo3DModel, TextTo3DModel, TripoSplatImageTo3DModel
 from ...utils import download_file
 from ..operators import FalOperator
 
@@ -113,8 +113,13 @@ def _download_obj_bundle(info: dict) -> str:
     return obj_path
 
 
-def _handle_3d_result(job: FalJob, name: str) -> None:
-    """Download 3D result and import into the scene, falling back to OBJ if GLB fails."""
+def _handle_3d_result(job: FalJob, name: str, *, is_splat: bool = False) -> None:
+    """Download 3D result and import into the scene, falling back to OBJ if GLB fails.
+
+    When ``is_splat`` is set (the selected model produces a 3D Gaussian splat)
+    — or the result file is a ``.ply`` / ``.splat`` — the file is routed to
+    ``import_splat`` instead of the GLB/OBJ mesh path.
+    """
     if job.status == "error":
         print(f"fal.ai: 3D generation failed: {job.error}")
         return
@@ -122,8 +127,27 @@ def _handle_3d_result(job: FalJob, name: str) -> None:
     result = job.result or {}
     cursor_loc = tuple(bpy.context.scene.cursor.location)
 
+    # --- Gaussian splat path ---
+    # The result file is under the same keys as a GLB (e.g. ``model_mesh``),
+    # but it's a splat, so it must NOT go through import_glb.
+    model_url = _find_glb_url(result)
+    url_is_splat = bool(model_url) and model_url.split("?")[0].lower().endswith(
+        (".ply", ".splat")
+    )
+    if model_url and (is_splat or url_is_splat):
+        try:
+            ext = os.path.splitext(model_url.split("?")[0])[1].lower()
+            suffix = ext if ext in (".ply", ".splat") else ".ply"
+            local_path = download_file(model_url, suffix=suffix)
+            obj = import_splat(local_path, name=f"fal_{name}", location=cursor_loc)
+            print(f"fal.ai: Imported Gaussian splat object '{obj.name}'")
+            return
+        except Exception as e:
+            print(f"fal.ai: Splat import failed: {e}")
+            return
+
     # --- Try GLB first ---
-    glb_url = _find_glb_url(result)
+    glb_url = model_url
     if glb_url:
         try:
             local_path = download_file(glb_url, suffix=".glb")
@@ -231,8 +255,14 @@ class FalGenerate3DOperator(FalOperator):
         )
         params = self.with_advanced_params(params, props)
 
+        # TripoSplat returns a Gaussian splat, not a triangle mesh — route its
+        # result through the splat importer.
+        is_splat = isinstance(model, type) and issubclass(
+            model, TripoSplatImageTo3DModel
+        )
+
         def on_complete(job: FalJob) -> None:
-            _handle_3d_result(job, "image_model")
+            _handle_3d_result(job, "image_model", is_splat=is_splat)
 
         job = FalJob(
             endpoint=model.endpoint,

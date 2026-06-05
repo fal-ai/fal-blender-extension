@@ -5,6 +5,7 @@ Note: These tests mock the minimal VisualFalModel behavior
 since the full models module requires Blender imports.
 """
 
+import struct
 import warnings
 from typing import Any, ClassVar
 
@@ -557,6 +558,326 @@ class TestRodinV25Parameters:
         # The API's "None" material (geometry only) must survive — it is a
         # real value, distinct from the "NONE" auto/unset sentinel.
         assert self._Rodin.parameters(rodin_material="None")["material"] == "None"
+
+
+class TestTripoSplatParameters:
+    """TripoSplat is image-only and always requests PLY output. It declares no
+    prompt field, and forwards num_gaussians / num_inference_steps /
+    guidance_scale / seed through the generic ``ui_parameter_map`` machinery.
+
+    Runs here (bpy-free) against a local mirror of
+    ``models/mesh_generation/base.py::TripoSplatModel`` — keep them in sync."""
+
+    class _TripoSplat:
+        """Minimal mirror of MeshGenerationModel + TripoSplatModel forwarding."""
+
+        image_url_parameter: ClassVar[str | None] = "image_url"
+        # No prompt field on this endpoint.
+        prompt_parameter: ClassVar[str | None] = None
+        static_parameters: ClassVar[dict[str, Any]] = {"output_format": "ply"}
+        ui_parameter_map: ClassVar[dict[str, str]] = {
+            "num_gaussians": "num_gaussians",
+            "num_inference_steps": "num_inference_steps",
+            "guidance_scale": "guidance_scale",
+            "seed": "seed",
+        }
+
+        @classmethod
+        def parameters(cls, **kwargs: Any) -> dict[str, Any]:
+            # static defaults first (copy so we don't mutate the class dict).
+            params: dict[str, Any] = dict(cls.static_parameters)
+
+            image_urls: list[str] = []
+            if "image_url" in kwargs:
+                image_urls.append(kwargs["image_url"])
+            if "image_path" in kwargs:
+                # Real code data-URI-encodes the path; the value is opaque here.
+                image_urls.append(kwargs["image_path"])
+            if cls.image_url_parameter and image_urls:
+                params[cls.image_url_parameter] = image_urls[0]
+
+            if cls.prompt_parameter:
+                params[cls.prompt_parameter] = kwargs.get("prompt", "")
+
+            for ui_name, api_name in cls.ui_parameter_map.items():
+                if ui_name not in kwargs:
+                    continue
+                value = kwargs[ui_name]
+                if value is None:
+                    continue
+                if isinstance(value, str) and (not value.strip() or value == "NONE"):
+                    continue
+                params[api_name] = value
+            return params
+
+    def test_image_url_and_static_output_format(self):
+        params = self._TripoSplat.parameters(image_url="https://x/cat.png")
+        assert params["image_url"] == "https://x/cat.png"
+        assert params["output_format"] == "ply"
+
+    def test_no_prompt_emitted(self):
+        # The endpoint takes no prompt — even when the operator passes one,
+        # nothing should be forwarded.
+        params = self._TripoSplat.parameters(
+            image_url="https://x/cat.png", prompt="a cat"
+        )
+        assert "prompt" not in params
+
+    def test_all_knobs_forwarded(self):
+        params = self._TripoSplat.parameters(
+            image_url="https://x/cat.png",
+            num_gaussians=131072,
+            num_inference_steps=30,
+            guidance_scale=5.5,
+            seed=99,
+        )
+        assert params == {
+            "output_format": "ply",
+            "image_url": "https://x/cat.png",
+            "num_gaussians": 131072,
+            "num_inference_steps": 30,
+            "guidance_scale": 5.5,
+            "seed": 99,
+        }
+
+    def test_unset_knobs_drop_to_defaults(self):
+        # None / undeclared values must not reach the params dict.
+        params = self._TripoSplat.parameters(
+            image_url="https://x/cat.png",
+            seed=None,
+            quad=True,  # not in the map
+        )
+        assert "seed" not in params
+        assert "quad" not in params
+        assert params == {"output_format": "ply", "image_url": "https://x/cat.png"}
+
+
+# ---------------------------------------------------------------------------
+# Splat PLY parser tests
+#
+# parse_splat_ply lives in the repo's bpy-free splat.py. This test file is
+# copied to /tmp before pytest runs, so locate splat.py via FAL_REPO_DIR (set
+# by run_tests.sh) or by walking up from the current working directory, then
+# import it directly.
+# ---------------------------------------------------------------------------
+
+
+def _load_splat_module():
+    """Import the repo's ``splat.py`` as a standalone module (no bpy needed)."""
+    import importlib.util
+    import os
+
+    candidates: list[str] = []
+    repo = os.environ.get("FAL_REPO_DIR")
+    if repo:
+        candidates.append(os.path.join(repo, "splat.py"))
+    directory = os.getcwd()
+    while True:
+        candidates.append(os.path.join(directory, "splat.py"))
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+
+    for path in candidates:
+        if os.path.isfile(path):
+            spec = importlib.util.spec_from_file_location("fal_splat_under_test", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+    raise FileNotFoundError(
+        "Could not locate splat.py (set FAL_REPO_DIR or run from the repo root)"
+    )
+
+
+def _write_binary_3dgs_ply(path, gaussians):
+    """Synthesize a tiny binary_little_endian 3DGS PLY at *path*.
+
+    ``gaussians`` is a list of dicts with keys x, y, z, f_dc_0/1/2, opacity,
+    scale_0/1/2, rot_0/1/2/3 (all floats). Property order mirrors a real INRIA
+    export (including unused nx/ny/nz so the parser must skip them).
+    """
+    props = [
+        "x", "y", "z",
+        "nx", "ny", "nz",
+        "f_dc_0", "f_dc_1", "f_dc_2",
+        "opacity",
+        "scale_0", "scale_1", "scale_2",
+        "rot_0", "rot_1", "rot_2", "rot_3",
+    ]
+    header_lines = ["ply", "format binary_little_endian 1.0", f"element vertex {len(gaussians)}"]
+    header_lines += [f"property float {name}" for name in props]
+    header_lines.append("end_header")
+    header = ("\n".join(header_lines) + "\n").encode("ascii")
+
+    body = bytearray()
+    for g in gaussians:
+        for name in props:
+            body += struct.pack("<f", float(g.get(name, 0.0)))
+
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(body)
+
+
+class TestSplatPlyParser:
+    """parse_splat_ply decodes SH→RGB color, sigmoid opacity, exp scale, and
+    normalized wxyz quaternions from a 3DGS PLY."""
+
+    SH_C0 = 0.28209479177387814
+
+    def _gaussians(self):
+        return [
+            {
+                "x": 1.0, "y": 2.0, "z": 3.0,
+                "nx": 0.1, "ny": 0.2, "nz": 0.3,  # unused, must be skipped
+                "f_dc_0": 1.0, "f_dc_1": -1.0, "f_dc_2": 0.0,
+                "opacity": 0.0,  # sigmoid(0) = 0.5
+                "scale_0": 0.0, "scale_1": 1.0, "scale_2": -1.0,  # exp -> 1, e, 1/e
+                "rot_0": 0.0, "rot_1": 0.0, "rot_2": 0.0, "rot_3": 2.0,  # -> (0,0,0,1)
+            },
+            {
+                "x": -4.0, "y": -5.0, "z": -6.0,
+                "nx": 0.0, "ny": 0.0, "nz": 0.0,
+                "f_dc_0": 0.0, "f_dc_1": 0.0, "f_dc_2": 0.0,  # -> 0.5 grey
+                "opacity": 100.0,  # sigmoid -> ~1.0
+                "scale_0": 2.0, "scale_1": 2.0, "scale_2": 2.0,
+                "rot_0": 1.0, "rot_1": 1.0, "rot_2": 1.0, "rot_3": 1.0,  # -> 0.5 each
+            },
+        ]
+
+    def _parse(self, tmp_path):
+        import numpy as np
+
+        splat = _load_splat_module()
+        ply = str(tmp_path / "tiny.ply")
+        _write_binary_3dgs_ply(ply, self._gaussians())
+        return splat, np, splat.parse_splat_ply(ply)
+
+    def test_count_and_positions(self, tmp_path):
+        import numpy as np
+
+        _, _, data = self._parse(tmp_path)
+        assert data["count"] == 2
+        np.testing.assert_allclose(
+            data["positions"],
+            [[1.0, 2.0, 3.0], [-4.0, -5.0, -6.0]],
+            rtol=1e-5,
+        )
+
+    def test_colors_from_sh_dc(self, tmp_path):
+        import numpy as np
+
+        _, _, data = self._parse(tmp_path)
+        c0 = self.SH_C0
+        expected = np.array(
+            [
+                [0.5 + c0 * 1.0, 0.5 + c0 * -1.0, 0.5 + c0 * 0.0],
+                [0.5, 0.5, 0.5],
+            ]
+        )
+        np.testing.assert_allclose(data["colors"], expected, rtol=1e-5, atol=1e-6)
+        # All channels stay within the valid 0..1 display range.
+        assert data["colors"].min() >= 0.0
+        assert data["colors"].max() <= 1.0
+
+    def test_opacity_sigmoid(self, tmp_path):
+        import numpy as np
+
+        _, _, data = self._parse(tmp_path)
+        np.testing.assert_allclose(data["opacity"], [0.5, 1.0], rtol=1e-4, atol=1e-4)
+
+    def test_scales_exp(self, tmp_path):
+        import numpy as np
+
+        _, _, data = self._parse(tmp_path)
+        expected = np.exp([[0.0, 1.0, -1.0], [2.0, 2.0, 2.0]])
+        np.testing.assert_allclose(data["scales"], expected, rtol=1e-5)
+
+    def test_rotations_normalized_wxyz(self, tmp_path):
+        import numpy as np
+
+        _, _, data = self._parse(tmp_path)
+        # First quat (0,0,0,2) normalizes to (0,0,0,1).
+        np.testing.assert_allclose(
+            data["rotations"][0], [0.0, 0.0, 0.0, 1.0], atol=1e-6
+        )
+        # Second quat (1,1,1,1) normalizes to 0.5 each.
+        np.testing.assert_allclose(
+            data["rotations"][1], [0.5, 0.5, 0.5, 0.5], atol=1e-6
+        )
+        # Every quaternion is unit length.
+        norms = np.linalg.norm(data["rotations"], axis=-1)
+        np.testing.assert_allclose(norms, [1.0, 1.0], atol=1e-6)
+
+    def test_missing_optional_fields_use_defaults(self, tmp_path):
+        import numpy as np
+
+        splat = _load_splat_module()
+        # A minimal PLY with only positions — color/opacity/scale/rot absent.
+        ply = str(tmp_path / "pos_only.ply")
+        header = (
+            "ply\n"
+            "format binary_little_endian 1.0\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "end_header\n"
+        ).encode("ascii")
+        with open(ply, "wb") as f:
+            f.write(header)
+            f.write(struct.pack("<fff", 7.0, 8.0, 9.0))
+
+        data = splat.parse_splat_ply(ply)
+        assert data["count"] == 1
+        np.testing.assert_allclose(data["colors"], [[0.5, 0.5, 0.5]], atol=1e-6)
+        np.testing.assert_allclose(data["opacity"], [1.0], atol=1e-6)
+        np.testing.assert_allclose(data["scales"], [[1.0, 1.0, 1.0]], atol=1e-6)
+        np.testing.assert_allclose(
+            data["rotations"], [[1.0, 0.0, 0.0, 0.0]], atol=1e-6
+        )
+
+    def test_ascii_ply_round_trips(self, tmp_path):
+        import numpy as np
+
+        splat = _load_splat_module()
+        ply = str(tmp_path / "ascii.ply")
+        header = (
+            "ply\n"
+            "format ascii 1.0\n"
+            "element vertex 2\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "property float f_dc_0\n"
+            "property float f_dc_1\n"
+            "property float f_dc_2\n"
+            "property float opacity\n"
+            "property float scale_0\n"
+            "property float scale_1\n"
+            "property float scale_2\n"
+            "property float rot_0\n"
+            "property float rot_1\n"
+            "property float rot_2\n"
+            "property float rot_3\n"
+            "end_header\n"
+        )
+        rows = (
+            "1 2 3 1 -1 0 0 0 1 -1 0 0 0 2\n"
+            "-4 -5 -6 0 0 0 100 2 2 2 1 1 1 1\n"
+        )
+        with open(ply, "w") as f:
+            f.write(header)
+            f.write(rows)
+
+        data = splat.parse_splat_ply(ply)
+        assert data["count"] == 2
+        np.testing.assert_allclose(
+            data["positions"], [[1, 2, 3], [-4, -5, -6]], rtol=1e-5
+        )
+        np.testing.assert_allclose(data["opacity"], [0.5, 1.0], atol=1e-4)
 
 
 if __name__ == "__main__":

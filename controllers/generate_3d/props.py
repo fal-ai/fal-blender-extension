@@ -85,6 +85,34 @@ class FalGenerate3DPropertyGroup(bpy.types.PropertyGroup):
         max=2_147_483_647,
     )
 
+    # ── TripoSplat (Gaussian splat) ───────────────────────────────────────
+    # Number of Gaussians to generate. The API rounds to the nearest 32.
+    num_gaussians: bpy.props.IntProperty(
+        name="Gaussians",
+        description="Number of Gaussians in the splat (rounded to nearest 32)",
+        default=262144,
+        min=32768,
+        max=262144,
+    )
+
+    # TripoSplat diffusion steps.
+    num_inference_steps: bpy.props.IntProperty(
+        name="Inference Steps",
+        description="Number of denoising steps",
+        default=20,
+        min=1,
+        max=50,
+    )
+
+    # TripoSplat classifier-free guidance scale.
+    guidance_scale: bpy.props.FloatProperty(
+        name="Guidance Scale",
+        description="How strongly to follow the input image",
+        default=3.0,
+        min=0.0,
+        max=10.0,
+    )
+
     # Tripo H3.1 only: separate seed for texture synthesis.
     texture_seed: bpy.props.IntProperty(
         name="Texture Seed",

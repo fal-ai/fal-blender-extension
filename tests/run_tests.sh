@@ -15,9 +15,10 @@ cd "$PROJECT_DIR"
 
 run_unit_tests() {
     echo "=== Running Unit Tests (pytest) ==="
-    # Run from temp dir to avoid bpy import issues
+    # Run from temp dir to avoid bpy import issues. Export the repo dir so the
+    # copied test can locate the bpy-free splat.py for the PLY parser tests.
     cp tests/test_models.py /tmp/test_models_fal.py
-    python3 -m pytest /tmp/test_models_fal.py -v
+    FAL_REPO_DIR="$PROJECT_DIR" python3 -m pytest /tmp/test_models_fal.py -v
     rm /tmp/test_models_fal.py
 }
 

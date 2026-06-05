@@ -27,7 +27,7 @@ Available in the 3D Viewport sidebar under the **fal.ai** tab.
 
 https://github.com/user-attachments/assets/4dbb0511-933b-43e6-986a-343f606cedc3
 
-Generates 3D models from image or text and imports the resulting mesh at the 3D cursor as GLB (falls back to OBJ + MTL + texture when needed).
+Generates 3D models from image or text and imports the resulting mesh at the 3D cursor as GLB (falls back to OBJ + MTL + texture when needed). Gaussian-splat endpoints (TripoSplat) instead import as a point cloud rendered with a Geometry Nodes billboard setup and an EEVEE material.
 
 #### Text-to-3D
 
@@ -52,6 +52,7 @@ Same endpoints, but conditioned on a source image (file on disk or current rende
 | [Hunyuan 3D v3.1 Rapid](https://fal.ai/models/fal-ai/hunyuan-3d/v3.1/rapid/image-to-3d) | Geometry-only option |
 | [Tripo P1](https://fal.ai/models/tripo3d/p1/image-to-3d) | Low-poly |
 | [Tripo H3.1](https://fal.ai/models/tripo3d/h3.1/image-to-3d) | Orientation + texture-alignment controls for image-to-3D |
+| [TripoSplat](https://fal.ai/models/tripo3d/triposplat) | Image-to-Gaussian-splat. Imports as a point cloud rendered via Geometry Nodes billboards + an EEVEE material (gaussian count, inference steps, guidance scale) |
 
 ---
 
@@ -371,6 +372,7 @@ models/               fal.ai endpoint definitions and parameter builders
 app.py                Panel registration for 3D and VSE sidebars
 job_queue.py          Async FalJob / JobManager (threads + bpy timer)
 importers.py          GLB/OBJ import, texture application, VSE strip helpers
+splat.py              Gaussian-splat (.ply/.splat) parser + Geometry Nodes import
 preferences.py        API key, output dir, auto-import
 utils.py              Upload/download, compositor snapshot/restore, fonts
 ```

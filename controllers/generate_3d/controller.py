@@ -62,6 +62,10 @@ class FalGenerate3DController(FalController):
             "auto_size",
             "orientation",
             "texture_alignment",
+            # TripoSplat (Gaussian splat)
+            "num_gaussians",
+            "num_inference_steps",
+            "guidance_scale",
             # Hyper3D Rodin v2.5
             "rodin_tier",
             "rodin_quality_mesh_option",
@@ -106,6 +110,10 @@ class FalGenerate3DController(FalController):
             "auto_size": _endpoint_supports("auto_size"),
             "orientation": _endpoint_supports("orientation"),
             "texture_alignment": _endpoint_supports("texture_alignment"),
+            # TripoSplat (Gaussian splat)
+            "num_gaussians": _endpoint_supports("num_gaussians"),
+            "num_inference_steps": _endpoint_supports("num_inference_steps"),
+            "guidance_scale": _endpoint_supports("guidance_scale"),
             # Hyper3D Rodin v2.5
             "rodin_tier": _endpoint_supports("rodin_tier"),
             "rodin_quality_mesh_option": _endpoint_supports(

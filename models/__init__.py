@@ -58,6 +58,7 @@ from .mesh_generation import (
     RodinV25ImageTo3DModel,
     RodinV25TextTo3DModel,
     TextTo3DModel,
+    TripoSplatImageTo3DModel,
 )
 from .video_generation import (
     DepthVideoModel,
@@ -183,6 +184,7 @@ __all__ = [
     "TextTo3DModel",
     "TextToVideoModel",
     "TilingTextureModel",
+    "TripoSplatImageTo3DModel",
     "Veo31FastImageToVideoModel",
     "Veo31FastTextToVideoModel",
     "Veo31ImageToVideoModel",

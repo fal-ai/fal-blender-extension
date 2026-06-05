@@ -8,6 +8,7 @@ from .base import (
     RodinV25Model,
     TripoH31Model,
     TripoP1Model,
+    TripoSplatModel,
 )
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "Hunyuan3DV31RapidImageTo3DModel",
     "TripoP1ImageTo3DModel",
     "TripoH31ImageTo3DModel",
+    "TripoSplatImageTo3DModel",
     "RodinV25ImageTo3DModel",
 ]
 
@@ -60,6 +62,16 @@ class TripoH31ImageTo3DModel(ImageTo3DModel, TripoH31Model):
         "orientation": "orientation",
         "texture_alignment": "texture_alignment",
     }
+
+
+class TripoSplatImageTo3DModel(ImageTo3DModel, TripoSplatModel):
+    """TripoSplat image-to-Gaussian-splat model.
+
+    Image-only — there is no text-to-3D counterpart. The result is a Gaussian
+    splat ``.ply`` that the operator imports via ``import_splat``.
+    """
+
+    endpoint = "tripo3d/triposplat"
 
 
 class RodinV25ImageTo3DModel(ImageTo3DModel, RodinV25Model):

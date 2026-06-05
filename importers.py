@@ -4,6 +4,11 @@ from typing import Any
 
 import bpy
 
+# Gaussian-splat import lives in its own bpy-free-at-top module (the parser is
+# host-unit-testable); re-export the Blender entry point here so callers have a
+# single import surface alongside import_glb / import_obj.
+from .splat import import_splat
+
 print("fal.ai: importers module loaded (VSE refresh: scene-swap + refresh_all)")
 
 __all__ = [
@@ -11,6 +16,7 @@ __all__ = [
     "import_image_as_texture",
     "import_glb",
     "import_obj",
+    "import_splat",
     "resize_image_to_target",
     "import_image_to_editor",
     "add_audio_to_vse",

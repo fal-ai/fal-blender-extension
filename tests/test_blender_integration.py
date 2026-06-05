@@ -635,6 +635,288 @@ def test_label_anchor_avoids_occluded_surfaces():
     )
 
 
+# ---------------------------------------------------------------------------
+# Gaussian-splat importer tests (fal_ai.splat)
+#
+# These mirror the host-side parser tests but run *inside Blender*, where
+# `import numpy` resolves to Blender's bundled build and the importer touches
+# real bpy (meshes, POINT attributes, a Geometry Nodes modifier, EEVEE
+# material). They only run when the extension is installed as `fal_ai`.
+# ---------------------------------------------------------------------------
+
+
+def _splat_test_gaussians():
+    """Two Gaussians with hand-checkable decode targets (mirrors the host suite)."""
+    return [
+        {
+            "x": 1.0, "y": 2.0, "z": 3.0,
+            "nx": 0.1, "ny": 0.2, "nz": 0.3,  # unused, parser must skip
+            "f_dc_0": 1.0, "f_dc_1": -1.0, "f_dc_2": 0.0,
+            "opacity": 0.0,  # sigmoid(0) = 0.5
+            "scale_0": 0.0, "scale_1": 1.0, "scale_2": -1.0,  # exp -> 1, e, 1/e
+            "rot_0": 0.0, "rot_1": 0.0, "rot_2": 0.0, "rot_3": 2.0,  # -> (0,0,0,1)
+        },
+        {
+            "x": -4.0, "y": -5.0, "z": -6.0,
+            "f_dc_0": 0.0, "f_dc_1": 0.0, "f_dc_2": 0.0,  # -> 0.5 grey
+            "opacity": 100.0,  # sigmoid -> ~1.0
+            "scale_0": 2.0, "scale_1": 2.0, "scale_2": 2.0,
+            "rot_0": 1.0, "rot_1": 1.0, "rot_2": 1.0, "rot_3": 1.0,  # -> 0.5 each
+        },
+    ]
+
+
+def _write_binary_3dgs_ply(path, gaussians):
+    """Synthesize a tiny binary_little_endian 3DGS PLY at *path*.
+
+    Property order mirrors a real INRIA export (including unused nx/ny/nz so
+    the parser must skip them).
+    """
+    import struct
+
+    props = [
+        "x", "y", "z",
+        "nx", "ny", "nz",
+        "f_dc_0", "f_dc_1", "f_dc_2",
+        "opacity",
+        "scale_0", "scale_1", "scale_2",
+        "rot_0", "rot_1", "rot_2", "rot_3",
+    ]
+    header_lines = [
+        "ply",
+        "format binary_little_endian 1.0",
+        f"element vertex {len(gaussians)}",
+    ]
+    header_lines += [f"property float {name}" for name in props]
+    header_lines.append("end_header")
+    header = ("\n".join(header_lines) + "\n").encode("ascii")
+
+    body = bytearray()
+    for g in gaussians:
+        for name in props:
+            body += struct.pack("<f", float(g.get(name, 0.0)))
+
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(body)
+
+
+def test_splat_parser_roundtrip_in_blender():
+    """parse_splat_ply decodes correctly when imported inside Blender.
+
+    Duplicates the host parser test, but proves the module imports cleanly in
+    Blender (where ``import numpy`` binds to Blender's bundled build) — a real
+    risk worth a dedicated guard.
+    """
+    if not hasattr(bpy.types.Scene, "fal_3d"):
+        print("⚠ Skipping splat parser roundtrip test (extension not loaded)")
+        return
+
+    import os
+    import tempfile
+
+    import numpy as np
+
+    from fal_ai.splat import SH_C0, parse_splat_ply
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".ply", delete=False)
+    tmp.close()
+    try:
+        _write_binary_3dgs_ply(tmp.name, _splat_test_gaussians())
+        data = parse_splat_ply(tmp.name)
+
+        assert data["count"] == 2, f"Expected 2 splats, got {data['count']}"
+        np.testing.assert_allclose(
+            data["positions"], [[1, 2, 3], [-4, -5, -6]], rtol=1e-5
+        )
+        # SH DC -> RGB: 0.5 + C0 * f_dc, clamped to 0..1.
+        np.testing.assert_allclose(
+            data["colors"],
+            [[0.5 + SH_C0, 0.5 - SH_C0, 0.5], [0.5, 0.5, 0.5]],
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(data["opacity"], [0.5, 1.0], rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(
+            data["scales"], np.exp([[0, 1, -1], [2, 2, 2]]), rtol=1e-5
+        )
+        # (0,0,0,2) -> (0,0,0,1); (1,1,1,1) -> 0.5 each; normalized wxyz.
+        np.testing.assert_allclose(
+            data["rotations"], [[0, 0, 0, 1], [0.5, 0.5, 0.5, 0.5]], atol=1e-6
+        )
+        print("✓ Splat PLY parser decodes correctly inside Blender")
+    finally:
+        os.unlink(tmp.name)
+
+
+def test_import_splat_builds_object_and_attributes():
+    """import_splat builds a MESH carrying the four POINT attributes + GN modifier."""
+    if not hasattr(bpy.types.Scene, "fal_3d"):
+        print("⚠ Skipping import_splat attribute test (extension not loaded)")
+        return
+
+    import os
+    import tempfile
+
+    import numpy as np
+
+    from fal_ai.splat import (
+        ATTR_COLOR,
+        ATTR_OPACITY,
+        ATTR_ROTATION,
+        ATTR_SCALE,
+        MATERIAL_NAME,
+        NODE_GROUP_NAME,
+        import_splat,
+        parse_splat_file,
+    )
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".ply", delete=False)
+    tmp.close()
+    obj = None
+    mesh = None
+    try:
+        _write_binary_3dgs_ply(tmp.name, _splat_test_gaussians())
+        decoded = parse_splat_file(tmp.name)
+        count = decoded["count"]
+
+        obj = import_splat(tmp.name, name="fal_test_splat", location=(0, 0, 0))
+        mesh = obj.data
+
+        # Object type + scene membership.
+        assert isinstance(obj, bpy.types.Object), "import_splat must return an Object"
+        assert obj.type == "MESH", f"Expected MESH, got {obj.type}"
+        assert obj.name in bpy.data.objects, "Object not registered in bpy.data"
+        assert (
+            obj.name in bpy.context.scene.objects
+        ), "Object not linked into the active scene"
+        assert len(mesh.vertices) == count, "Expected one vertex per Gaussian"
+
+        # The four POINT-domain attributes with the right domain/type and one
+        # entry per vertex.
+        expected = {
+            ATTR_COLOR: "FLOAT_COLOR",
+            ATTR_OPACITY: "FLOAT",
+            ATTR_SCALE: "FLOAT_VECTOR",
+            ATTR_ROTATION: "QUATERNION",
+        }
+        for attr_name, data_type in expected.items():
+            assert attr_name in mesh.attributes, f"Missing attribute {attr_name}"
+            attr = mesh.attributes[attr_name]
+            assert attr.domain == "POINT", f"{attr_name} domain {attr.domain} != POINT"
+            assert (
+                attr.data_type == data_type
+            ), f"{attr_name} type {attr.data_type} != {data_type}"
+            assert (
+                len(attr.data) == count
+            ), f"{attr_name} has {len(attr.data)} entries, expected {count}"
+
+        # Read attributes back via foreach_get and confirm the write path worked.
+        colors = np.empty(count * 4, dtype=np.float32)
+        mesh.attributes[ATTR_COLOR].data.foreach_get("color", colors)
+        colors = colors.reshape(count, 4)
+        np.testing.assert_allclose(colors[:, :3], decoded["colors"], rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(colors[:, 3], [1.0, 1.0], atol=1e-6)
+
+        opacity = np.empty(count, dtype=np.float32)
+        mesh.attributes[ATTR_OPACITY].data.foreach_get("value", opacity)
+        np.testing.assert_allclose(opacity, decoded["opacity"], rtol=1e-5, atol=1e-5)
+
+        scales = np.empty(count * 3, dtype=np.float32)
+        mesh.attributes[ATTR_SCALE].data.foreach_get("vector", scales)
+        np.testing.assert_allclose(
+            scales.reshape(count, 3), decoded["scales"], rtol=1e-5, atol=1e-5
+        )
+
+        rotations = np.empty(count * 4, dtype=np.float32)
+        mesh.attributes[ATTR_ROTATION].data.foreach_get("value", rotations)
+        np.testing.assert_allclose(
+            rotations.reshape(count, 4), decoded["rotations"], rtol=1e-5, atol=1e-5
+        )
+
+        # NODES modifier wired to the shared splat node group.
+        nodes_mods = [m for m in obj.modifiers if m.type == "NODES"]
+        assert len(nodes_mods) == 1, "Expected exactly one NODES modifier"
+        assert nodes_mods[0].node_group is not None, "Modifier has no node group"
+        assert (
+            nodes_mods[0].node_group.name == NODE_GROUP_NAME
+        ), "Modifier not wired to the shared splat node group"
+
+        # Shared datablocks now exist.
+        assert bpy.data.materials.get(MATERIAL_NAME) is not None, "Material missing"
+        assert bpy.data.node_groups.get(NODE_GROUP_NAME) is not None, "Node group missing"
+
+        print("✓ import_splat builds a MESH with POINT attributes and a GN modifier")
+    finally:
+        os.unlink(tmp.name)
+        # Remove the per-run object + mesh so a second run starts clean. Leave
+        # the shared node group / material — they're reused by name, not leaked.
+        if obj is not None and obj.name in bpy.data.objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.name in bpy.data.meshes:
+            bpy.data.meshes.remove(mesh)
+
+
+def test_import_splat_reuses_shared_datablocks():
+    """Re-importing reuses the shared node group + material (no ``.001`` dupes)."""
+    if not hasattr(bpy.types.Scene, "fal_3d"):
+        print("⚠ Skipping import_splat reuse test (extension not loaded)")
+        return
+
+    import os
+    import tempfile
+
+    from fal_ai.splat import MATERIAL_NAME, NODE_GROUP_NAME, import_splat
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".ply", delete=False)
+    tmp.close()
+    objs = []
+    meshes = []
+    try:
+        _write_binary_3dgs_ply(tmp.name, _splat_test_gaussians())
+
+        first = import_splat(tmp.name, name="fal_test_splat_a")
+        second = import_splat(tmp.name, name="fal_test_splat_b")
+        objs = [first, second]
+        meshes = [first.data, second.data]
+
+        def _nodes_group(o):
+            mods = [m for m in o.modifiers if m.type == "NODES"]
+            assert len(mods) == 1, f"Expected one NODES modifier, got {len(mods)}"
+            return mods[0].node_group
+
+        g1, g2 = _nodes_group(first), _nodes_group(second)
+        assert g1 is not None and g2 is not None, "Both modifiers need a node group"
+        assert g1 == g2, "Both imports should point at the same node group object"
+        assert g1.name == NODE_GROUP_NAME, "Node group should not be suffixed (.001)"
+        assert (
+            bpy.data.node_groups.get(NODE_GROUP_NAME + ".001") is None
+        ), "Second import duplicated the node group"
+
+        # The shared material lives on the Set Material node inside the group;
+        # both imports reuse it (same datablock, no .001 duplicate).
+        mat = bpy.data.materials.get(MATERIAL_NAME)
+        assert mat is not None, "Shared material missing"
+        assert (
+            bpy.data.materials.get(MATERIAL_NAME + ".001") is None
+        ), "Second import duplicated the material"
+        set_mat = [n for n in g1.nodes if n.bl_idname == "GeometryNodeSetMaterial"]
+        assert len(set_mat) == 1, "Expected one Set Material node in the group"
+        assert (
+            set_mat[0].inputs["Material"].default_value == mat
+        ), "Set Material node should reference the shared material"
+
+        print("✓ import_splat reuses the shared node group and material across imports")
+    finally:
+        os.unlink(tmp.name)
+        for o in objs:
+            if o is not None and o.name in bpy.data.objects:
+                bpy.data.objects.remove(o, do_unlink=True)
+        for m in meshes:
+            if m is not None and m.name in bpy.data.meshes:
+                bpy.data.meshes.remove(m)
+
+
 def run_all_tests():
     """Run all tests and report results."""
     tests = [
@@ -653,6 +935,9 @@ def run_all_tests():
         test_vse_importer_uses_explicit_scene,
         test_pointer_property_for_images,
         test_label_anchor_avoids_occluded_surfaces,
+        test_splat_parser_roundtrip_in_blender,
+        test_import_splat_builds_object_and_attributes,
+        test_import_splat_reuses_shared_datablocks,
     ]
 
     passed = 0

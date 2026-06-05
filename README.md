@@ -391,7 +391,9 @@ cd fal-blender
 ./tests/run_tests.sh
 ```
 
-Model tests don't require Blender; they exercise the `FalModel.parameters()` builders and the per-endpoint `ui_parameter_map` forwarding.
+Model tests don't require Blender; they exercise the `FalModel.parameters()` builders and the per-endpoint `ui_parameter_map` forwarding. They also cover the bpy-free Gaussian-splat PLY parser (`splat.parse_splat_ply`).
+
+Integration tests run inside Blender (`./tests/run_tests.sh integration`, or `blender --background --python tests/test_blender_integration.py`) and require the extension installed as `fal_ai`. Alongside the operator/render/VSE coverage, they exercise the splat importer end to end: parsing inside Blender's bundled numpy, building the point-cloud mesh with the `splat_color`/`splat_opacity`/`splat_scale`/`splat_rotation` POINT attributes, wiring the Geometry Nodes billboard modifier, and confirming the shared node group + EEVEE material are reused across imports.
 
 ## Planned
 

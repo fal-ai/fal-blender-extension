@@ -304,19 +304,29 @@ def parse_splat_file(path: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_splat_material(get_eevee_blend: bool = True) -> "bpy.types.Material":
+def _ensure_splat_material() -> "bpy.types.Material":
     """Build (or reuse) the EEVEE billboard material for splat instances.
 
     The material reads two instance attributes written by :func:`import_splat`:
 
-    - ``splat_color`` — per-splat RGB, drives an Emission shader so the cloud
-      reads correctly regardless of scene lighting.
+    - ``splat_color`` — per-splat RGB, drives the emission of a single
+      Principled BSDF so the cloud reads correctly regardless of scene lighting.
     - ``splat_opacity`` — per-splat alpha multiplier.
 
     The quad's UV is used to build a radial Gaussian falloff: alpha peaks at
     the quad center and decays toward the edges, approximating a 2D Gaussian
-    footprint. Final alpha = ``gaussian(uv) * splat_opacity``, blended over the
-    background via a Transparent/Emission Mix Shader.
+    footprint. Final alpha = ``gaussian(uv) * splat_opacity`` and feeds the
+    Principled BSDF ``Alpha``.
+
+    Performance/visibility note: the previous build used a Transparent +
+    Emission ``Mix Shader`` with ``surface_render_method="BLENDED"`` (EEVEE-Next
+    order-independent transparency). Over a 262k-instance cloud that OIT path is
+    pathologically slow *and* can vanish entirely depending on transparency
+    sort / backface. We switch to a single Principled BSDF with a hashed
+    (``DITHERED``) render method: no Mix Shader, no OIT, sort-independent — far
+    cheaper and reliably visible. The radial Gaussian falloff is kept (it is
+    what makes splats look soft); the math is cheap — the cost was the OIT, not
+    the falloff.
     """
     import bpy
 
@@ -327,13 +337,16 @@ def _ensure_splat_material(get_eevee_blend: bool = True) -> "bpy.types.Material"
     mat = bpy.data.materials.new(MATERIAL_NAME)
     mat.use_nodes = True
 
-    # EEVEE-Next (Blender 4.2) renamed the legacy `blend_method`. Set whichever
-    # the running build exposes so transparency actually composits.
+    # Cheapest render method that's reliably visible. EEVEE-Next (Blender 4.2+)
+    # replaced `blend_method` with `surface_render_method`: "DITHERED" is
+    # grayscale/hashed alpha — sort-independent and much cheaper than "BLENDED"
+    # order-independent transparency. On <4.2 use the legacy "HASHED" blend mode
+    # for the same reason (NOT "BLEND": blended OIT over this many instances is
+    # the perf killer and can disappear depending on sort/backface).
     if hasattr(mat, "surface_render_method"):
-        # 4.2+: "BLENDED" = order-independent alpha blend (no z-prepass).
-        mat.surface_render_method = "BLENDED"
+        mat.surface_render_method = "DITHERED"
     if hasattr(mat, "blend_method"):
-        mat.blend_method = "BLEND"
+        mat.blend_method = "HASHED"
     if hasattr(mat, "show_transparent_back"):
         mat.show_transparent_back = False
 
@@ -343,25 +356,30 @@ def _ensure_splat_material(get_eevee_blend: bool = True) -> "bpy.types.Material"
     nodes.clear()
 
     output = nodes.new("ShaderNodeOutputMaterial")
-    output.location = (600, 0)
+    output.location = (820, 0)
 
-    mix = nodes.new("ShaderNodeMixShader")
-    mix.location = (400, 0)
-
-    transparent = nodes.new("ShaderNodeBsdfTransparent")
-    transparent.location = (200, 120)
-
-    emission = nodes.new("ShaderNodeEmission")
-    emission.location = (200, -120)
-    emission.inputs["Strength"].default_value = 1.0
+    # Single shader: Principled BSDF with a black base color (so there's no lit
+    # diffuse contribution), an emissive splat color, and alpha driven by the
+    # radial Gaussian * opacity. One BSDF, no Mix Shader.
+    principled = nodes.new("ShaderNodeBsdfPrincipled")
+    principled.location = (560, 0)
+    principled.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+    if "Emission Strength" in principled.inputs:
+        principled.inputs["Emission Strength"].default_value = 1.0
+    links.new(principled.outputs["BSDF"], output.inputs["Surface"])
 
     # Per-instance color (the points carry it; instancing promotes it to the
-    # instance domain, which the INSTANCER attribute type reads back).
+    # instance domain, which the INSTANCER attribute type reads back). Drives
+    # the Principled emission. Socket was renamed "Emission" -> "Emission Color"
+    # in Blender 4.0, so resolve whichever the running build exposes.
     color_attr = nodes.new("ShaderNodeAttribute")
     color_attr.location = (-200, -120)
     color_attr.attribute_type = "INSTANCER"
     color_attr.attribute_name = ATTR_COLOR
-    links.new(color_attr.outputs["Color"], emission.inputs["Color"])
+    emission_socket = (
+        "Emission Color" if "Emission Color" in principled.inputs else "Emission"
+    )
+    links.new(color_attr.outputs["Color"], principled.inputs[emission_socket])
 
     # Per-instance opacity multiplier.
     opacity_attr = nodes.new("ShaderNodeAttribute")
@@ -416,11 +434,9 @@ def _ensure_splat_material(get_eevee_blend: bool = True) -> "bpy.types.Material"
     links.new(gauss.outputs["Value"], alpha.inputs[0])
     links.new(opacity_attr.outputs["Fac"], alpha.inputs[1])
 
-    # Mix factor 0 -> transparent, 1 -> emission, so feed alpha as the factor.
-    links.new(alpha.outputs["Value"], mix.inputs["Fac"])
-    links.new(transparent.outputs["BSDF"], mix.inputs[1])
-    links.new(emission.outputs["Emission"], mix.inputs[2])
-    links.new(mix.outputs["Shader"], output.inputs["Surface"])
+    # Drive the Principled alpha directly; with the DITHERED render method this
+    # hashes the soft footprint without any Mix Shader / OIT.
+    links.new(alpha.outputs["Value"], principled.inputs["Alpha"])
 
     return mat
 
@@ -429,10 +445,27 @@ def _ensure_splat_node_group(material: "bpy.types.Material") -> "bpy.types.Geome
     """Build (or reuse) the Geometry Nodes group that instances billboards.
 
     Pipeline: the input point-cloud mesh feeds *Instance on Points*; each point
-    gets a unit billboard quad (a 2×2 *Grid*) carrying ``material``, scaled by
-    the ``splat_scale`` vector attribute and oriented by the ``splat_rotation``
-    quaternion attribute. The per-point color/opacity attributes ride along to
-    the instance domain for the material to read.
+    gets a unit billboard quad (a 2×2 *Grid*, which lies in XY so its normal is
+    +Z) carrying ``material``, scaled by the ``splat_scale`` vector attribute.
+
+    Orientation is **camera-facing**, not per-splat. A flat quad oriented by an
+    arbitrary Gaussian quaternion is edge-on to the camera much of the time and
+    therefore invisible, so instead of using ``splat_rotation`` we rotate every
+    quad to face the active camera (the pragmatic approach the simpler GS addons
+    take to get something visible). The camera is taken from a ``Camera`` group
+    *input* (a ``NodeSocketObject``) rather than a hardcoded Object Info
+    datablock — that keeps the node group shareable across imports, which the
+    integration test requires (the group must be reused, not duplicated).
+
+    The per-point color/opacity attributes ride along to the instance domain for
+    the material to read. ``splat_rotation`` is still written to the mesh by
+    :func:`import_splat` (the integration test checks it exists) — it just is no
+    longer used to orient the quad.
+
+    Anisotropy tradeoff: ``splat_scale`` still drives the (anisotropic) instance
+    scale, but the camera-facing rotation overrides any per-splat orientation.
+    A future pass could project the 3D covariance to a screen-space ellipse for
+    true 3DGS; camera-facing billboards are the correct-enough first step.
     """
     import bpy
 
@@ -442,52 +475,84 @@ def _ensure_splat_node_group(material: "bpy.types.Material") -> "bpy.types.Geome
 
     group = bpy.data.node_groups.new(NODE_GROUP_NAME, "GeometryNodeTree")
 
-    # Group interface: geometry in, geometry out (Blender 4.x interface API).
+    # Group interface: geometry in, geometry out (Blender 4.x interface API),
+    # plus a Camera object input the modifier points at the scene camera.
     group.interface.new_socket(
         name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
     )
     group.interface.new_socket(
         name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
     )
+    group.interface.new_socket(
+        name="Camera", in_out="INPUT", socket_type="NodeSocketObject"
+    )
 
     nodes = group.nodes
     links = group.links
 
     group_in = nodes.new("NodeGroupInput")
-    group_in.location = (-600, 0)
+    group_in.location = (-800, 0)
     group_out = nodes.new("NodeGroupOutput")
     group_out.location = (600, 0)
 
     # The billboard source: a single quad (2×2 grid) with UVs for the material.
     grid = nodes.new("GeometryNodeMeshGrid")
-    grid.location = (-400, -260)
+    grid.location = (-400, -320)
     grid.inputs["Size X"].default_value = 1.0
     grid.inputs["Size Y"].default_value = 1.0
     grid.inputs["Vertices X"].default_value = 2
     grid.inputs["Vertices Y"].default_value = 2
 
     set_mat = nodes.new("GeometryNodeSetMaterial")
-    set_mat.location = (-200, -260)
+    set_mat.location = (-200, -320)
     set_mat.inputs["Material"].default_value = material
     links.new(grid.outputs["Mesh"], set_mat.inputs["Geometry"])
 
-    # Per-point scale (FLOAT_VECTOR) and rotation (QUATERNION -> Rotation socket).
+    # Per-point (anisotropic) scale.
     scale_attr = nodes.new("GeometryNodeInputNamedAttribute")
     scale_attr.location = (-400, 180)
     scale_attr.data_type = "FLOAT_VECTOR"
     scale_attr.inputs["Name"].default_value = ATTR_SCALE
 
-    rot_attr = nodes.new("GeometryNodeInputNamedAttribute")
-    rot_attr.location = (-400, 60)
-    rot_attr.data_type = "QUATERNION"
-    rot_attr.inputs["Name"].default_value = ATTR_ROTATION
+    # --- Camera-facing rotation chain ---
+    # ObjectInfo(Camera, RELATIVE).Location gives the camera position in the
+    # instanced geometry's local space — the same space as Input Position — so
+    # (camera_location - position) is the view direction toward the camera in
+    # that local space.
+    cam_info = nodes.new("GeometryNodeObjectInfo")
+    cam_info.location = (-600, 420)
+    cam_info.transform_space = "RELATIVE"
+    links.new(group_in.outputs["Camera"], cam_info.inputs["Object"])
+
+    position = nodes.new("GeometryNodeInputPosition")
+    position.location = (-600, 280)
+
+    view_dir = nodes.new("ShaderNodeVectorMath")
+    view_dir.location = (-360, 380)
+    view_dir.operation = "SUBTRACT"
+    links.new(cam_info.outputs["Location"], view_dir.inputs[0])
+    links.new(position.outputs["Position"], view_dir.inputs[1])
+
+    # Align the quad's +Z (the 2×2 grid's normal) to the view direction, so the
+    # quad faces the camera. If the Camera input is unset (None), Object Info
+    # returns a zero Location and the view direction degenerates to -Position;
+    # Align Euler to Vector still yields a finite rotation (and identity for the
+    # point at the local origin), so nothing crashes and the result is no worse
+    # than the previous, frequently-invisible per-splat orientation.
+    align = nodes.new("FunctionNodeAlignEulerToVector")
+    align.location = (-140, 380)
+    align.axis = "Z"
+    align.inputs["Factor"].default_value = 1.0
+    links.new(view_dir.outputs["Vector"], align.inputs["Vector"])
 
     instance = nodes.new("GeometryNodeInstanceOnPoints")
-    instance.location = (0, 0)
+    instance.location = (120, 0)
     links.new(group_in.outputs["Geometry"], instance.inputs["Points"])
     links.new(set_mat.outputs["Geometry"], instance.inputs["Instance"])
     links.new(scale_attr.outputs["Attribute"], instance.inputs["Scale"])
-    links.new(rot_attr.outputs["Attribute"], instance.inputs["Rotation"])
+    # Euler output implicitly converts to the Rotation socket (same implicit
+    # conversion the previous QUATERNION attribute relied on).
+    links.new(align.outputs["Rotation"], instance.inputs["Rotation"])
 
     links.new(instance.outputs["Instances"], group_out.inputs["Geometry"])
 
@@ -553,6 +618,24 @@ def import_splat(
 
     modifier = obj.modifiers.new(name="fal_splat", type="NODES")
     modifier.node_group = group
+
+    # Point the camera-facing billboards at the scene camera out of the box.
+    # GN group inputs are addressed on the modifier by the socket *identifier*
+    # (e.g. "Socket_3"), not its name, so resolve it from the group interface by
+    # the socket's display name. Best-effort: a missing camera (camera is None,
+    # which is acceptable) or any API-shape difference must not break the import.
+    # Re-point this to any camera later by setting the same modifier input.
+    try:
+        camera = getattr(bpy.context.scene, "camera", None)
+        for item in group.interface.items_tree:
+            if (
+                getattr(item, "in_out", None) == "INPUT"
+                and getattr(item, "name", None) == "Camera"
+            ):
+                modifier[item.identifier] = camera
+                break
+    except Exception as exc:  # pragma: no cover - defensive, env-dependent
+        print(f"fal.ai: could not wire splat camera input: {exc}")
 
     # Link into the active collection (fall back to the scene collection).
     collection = getattr(bpy.context, "collection", None) or bpy.context.scene.collection

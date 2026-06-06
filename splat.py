@@ -379,7 +379,28 @@ def _ensure_splat_material() -> "bpy.types.Material":
     emission_socket = (
         "Emission Color" if "Emission Color" in principled.inputs else "Emission"
     )
-    links.new(color_attr.outputs["Color"], principled.inputs[emission_socket])
+
+    # Color-space correction. The decoded SH-DC colors stored in `splat_color`
+    # are display/sRGB-ish 0..1 magnitudes (that's how 3DGS viewers like Kiri /
+    # web display them — decoded RGB shown directly, no extra transform). But a
+    # FLOAT_COLOR attribute is interpreted by Blender as LINEAR scene-referred
+    # data, so feeding the sRGB-magnitude numbers straight into the linear
+    # emission slot makes the view transform lighten/desaturate them — the pale,
+    # washed-out look. Raise to gamma 2.2 to linearize the sRGB-ish color into
+    # the space the emission slot expects.
+    #
+    # NOTE: this fixes the sRGB<->linear mismatch only. For an exact match to
+    # Kiri / web (which do NO filmic tonemapping), the scene's View Transform
+    # should also be 'Standard' (Render Properties -> Color Management). Under
+    # Blender 4.x's default AgX (or Filmic) the result will still be tone-mapped
+    # / slightly muted. We deliberately do NOT change scene color management from
+    # code (out of scope, would surprise the user) — this gamma node gets the
+    # color much closer; the view-transform setting is the user's call.
+    gamma = nodes.new("ShaderNodeGamma")
+    gamma.location = (200, -120)
+    gamma.inputs["Gamma"].default_value = 2.2
+    links.new(color_attr.outputs["Color"], gamma.inputs["Color"])
+    links.new(gamma.outputs["Color"], principled.inputs[emission_socket])
 
     # Per-instance opacity multiplier.
     opacity_attr = nodes.new("ShaderNodeAttribute")
@@ -406,14 +427,18 @@ def _ensure_splat_material() -> "bpy.types.Material":
     # Scale radius (0..~0.707 across the quad) so the falloff fills the quad.
     # This factor is the Gaussian tightness `k` in alpha = exp(-(k*r)^2). LOWER
     # k = softer/larger visible dot (more of the quad reads as opaque); higher k
-    # = tiny central dot. At k=4 only a sub-pixel core was opaque (the cloud
-    # rendered as noise); k=1.5 keeps the disc soft but fills the quad:
-    #   r=0.5  -> exp(-(0.75)^2)  = 0.57
-    #   r=0.707-> exp(-(1.06)^2)  = 0.32
+    # = tiny central dot. k=4 left only a sub-pixel core opaque (noise); k=1.5
+    # was too loose — the gaussian was still ~0.32 at the quad CORNER, which the
+    # alpha-boost then saturated into a fully-opaque SQUARE. k=2.5 makes the dot
+    # strong in the center yet genuinely ~0 by the corner, so it reads ROUND and
+    # fully fades to 0 BEFORE the quad edge:
+    #   r=0.3  -> exp(-(0.75)^2)  = 0.57
+    #   r=0.5  -> exp(-(1.25)^2)  = 0.21
+    #   r=0.707-> exp(-(1.77)^2)  = 0.044  (~0 at the corner -> no square)
     scale_r = nodes.new("ShaderNodeMath")
     scale_r.location = (0, 320)
     scale_r.operation = "MULTIPLY"
-    scale_r.inputs[1].default_value = 1.5  # Gaussian tightness k (lower = larger dot)
+    scale_r.inputs[1].default_value = 2.5  # Gaussian tightness k (lower = larger dot)
     links.new(radius.outputs["Value"], scale_r.inputs[0])
 
     sq = nodes.new("ShaderNodeMath")
@@ -440,24 +465,26 @@ def _ensure_splat_material() -> "bpy.types.Material":
     links.new(gauss.outputs["Value"], alpha.inputs[0])
     links.new(opacity_attr.outputs["Fac"], alpha.inputs[1])
 
-    # Boost + clamp the alpha so the DITHERED (hashed) render method shows a
-    # solid disc instead of sparse noise. Hashed transparency turns a fractional
-    # alpha into stochastically-kept pixels: a soft dot whose alpha sits around
-    # ~0.2-0.3 (gaussian ~0.5 * opacity ~0.5) hashes to a scatter of dots that
-    # reads as grey noise. Multiplying by 3.0 and clamping to [0,1] saturates the
-    # central region to 1.0 (so it dithers to a solid core) while the gaussian
-    # tail still drives the edge to 0 — a mostly-opaque soft disc, not noise.
-    boost = nodes.new("ShaderNodeMath")
-    boost.location = (800, 320)
-    boost.operation = "MULTIPLY"
-    boost.inputs[1].default_value = 3.0  # alpha boost so DITHERED reads as solid
-    boost.use_clamp = True  # clamp result to [0,1]
-    links.new(alpha.outputs["Value"], boost.inputs[0])
+    # Soften (not boost) the alpha so the DITHERED (hashed) render method shows a
+    # solid-cored disc instead of sparse noise — WITHOUT flattening the falloff
+    # into a hard square. A previous attempt multiplied by 3.0 and clamped to
+    # [0,1]; that saturated essentially the whole quad (corners included) to
+    # alpha=1.0, so the soft disc became a fully-opaque square tile. Instead use
+    # a single POWER node with exponent 0.5 (sqrt). sqrt is monotonic and lifts
+    # the mid alphas toward 1 (0.21->0.46, 0.57->0.75, 0.9->0.95) so the core is
+    # solid enough for hashing, yet it still hits 0 at the rim (sqrt(0)=0) so the
+    # dot stays ROUND with a soft edge — no square.
+    soften = nodes.new("ShaderNodeMath")
+    soften.location = (800, 320)
+    soften.operation = "POWER"
+    soften.inputs[1].default_value = 0.5  # sqrt: lift core, keep round soft edge
+    soften.use_clamp = True  # clamp result to [0,1]
+    links.new(alpha.outputs["Value"], soften.inputs[0])
 
-    # Drive the Principled alpha with the boosted/clamped value; with the
-    # DITHERED render method this hashes the (now solid-cored) soft footprint
-    # without any Mix Shader / OIT.
-    links.new(boost.outputs["Value"], principled.inputs["Alpha"])
+    # Drive the Principled alpha with the softened value; with the DITHERED
+    # render method this hashes the (now solid-cored) soft footprint without any
+    # Mix Shader / OIT.
+    links.new(soften.outputs["Value"], principled.inputs["Alpha"])
 
     return mat
 

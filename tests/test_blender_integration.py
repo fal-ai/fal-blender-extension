@@ -17,20 +17,48 @@ except ImportError:
     sys.exit(1)
 
 
+def _ensure_fal_ai_importable():
+    """Make the bare module name ``fal_ai`` importable.
+
+    Blender installs the extension under the package name
+    ``bl_ext.user_default.fal_ai`` and, on 4.2+, auto-enables it at startup.
+    Our tests do ``from fal_ai... import ...`` with the *bare* name, which only
+    resolves if the ``user_default`` extensions directory is on ``sys.path``.
+    Auto-enable doesn't add it, so we add it here at module-load time —
+    regardless of whether the extension was already enabled under its
+    ``bl_ext.*`` name.
+
+    Best-effort: any odd environment (e.g. no EXTENSIONS resource) degrades to
+    the previous behaviour, where ``import fal_ai`` simply fails and the
+    affected tests skip themselves.
+    """
+    try:
+        from pathlib import Path
+
+        # Official API for Blender's user extension path (exists on 4.2+).
+        user_extensions = Path(bpy.utils.user_resource("EXTENSIONS")) / "user_default"
+        if (user_extensions / "fal_ai").exists():
+            path_str = str(user_extensions)
+            if path_str not in sys.path:
+                sys.path.insert(0, path_str)
+                print(f"Added extension path: {user_extensions}")
+    except Exception as e:
+        print(f"Could not add fal_ai extension path: {e}")
+
+
+# Run at import time so `from fal_ai... import ...` resolves to the installed
+# extension package whether or not Blender already auto-enabled it.
+_ensure_fal_ai_importable()
+
+
 def _ensure_extension_enabled():
     """Try to enable the fal.ai extension if not already loaded."""
+    # Guarantee the bare-name import path is present even in the
+    # already-auto-enabled case (where we'd otherwise return early below).
+    _ensure_fal_ai_importable()
+
     if hasattr(bpy.types.Scene, "fal_3d"):
         return True  # Already loaded
-
-    from pathlib import Path
-
-    # Get Blender's user extension path via official API
-    user_extensions = Path(bpy.utils.user_resource("EXTENSIONS")) / "user_default"
-    fal_path = user_extensions / "fal_ai"
-
-    if fal_path.exists() and str(user_extensions) not in sys.path:
-        sys.path.insert(0, str(user_extensions))
-        print(f"Added extension path: {user_extensions}")
 
     # Try addon_utils — this calls register() automatically
     try:
@@ -228,11 +256,21 @@ def test_invoke_shows_confirm_for_video_and_skips_for_image():
         return
 
     try:
-        # Video (T2V) — should trigger confirm.
+        # Video (T2V) — should trigger confirm. The fake invoke_confirm captures
+        # the call and returns {"RUNNING_MODAL"} *before* anything submits, so
+        # the capture below is valid regardless of what happens next. In
+        # --background mode bpy.app.online_access is False, and the confirm
+        # flow can still flow through to execute()/submit, where the
+        # requires_internet_access decorator raises RuntimeError. That offline
+        # submission error is irrelevant to this test (we only assert the
+        # confirm dialog fired), so swallow it — same as the image branch below.
         v_props = bpy.context.scene.falvideocontroller_props
         v_props.mode = "TEXT"
         v_props.prompt = "test prompt"
-        bpy.ops.fal.fal_video_operator("INVOKE_DEFAULT")
+        try:
+            bpy.ops.fal.fal_video_operator("INVOKE_DEFAULT")
+        except Exception:
+            pass
 
         video_calls = [c for c in captured if c["operator"] == "fal.fal_video_operator"]
         assert (

@@ -404,10 +404,16 @@ def _ensure_splat_material() -> "bpy.types.Material":
     links.new(center.outputs["Vector"], radius.inputs[0])
 
     # Scale radius (0..~0.707 across the quad) so the falloff fills the quad.
+    # This factor is the Gaussian tightness `k` in alpha = exp(-(k*r)^2). LOWER
+    # k = softer/larger visible dot (more of the quad reads as opaque); higher k
+    # = tiny central dot. At k=4 only a sub-pixel core was opaque (the cloud
+    # rendered as noise); k=1.5 keeps the disc soft but fills the quad:
+    #   r=0.5  -> exp(-(0.75)^2)  = 0.57
+    #   r=0.707-> exp(-(1.06)^2)  = 0.32
     scale_r = nodes.new("ShaderNodeMath")
     scale_r.location = (0, 320)
     scale_r.operation = "MULTIPLY"
-    scale_r.inputs[1].default_value = 4.0  # falloff tightness
+    scale_r.inputs[1].default_value = 1.5  # Gaussian tightness k (lower = larger dot)
     links.new(radius.outputs["Value"], scale_r.inputs[0])
 
     sq = nodes.new("ShaderNodeMath")
@@ -434,9 +440,24 @@ def _ensure_splat_material() -> "bpy.types.Material":
     links.new(gauss.outputs["Value"], alpha.inputs[0])
     links.new(opacity_attr.outputs["Fac"], alpha.inputs[1])
 
-    # Drive the Principled alpha directly; with the DITHERED render method this
-    # hashes the soft footprint without any Mix Shader / OIT.
-    links.new(alpha.outputs["Value"], principled.inputs["Alpha"])
+    # Boost + clamp the alpha so the DITHERED (hashed) render method shows a
+    # solid disc instead of sparse noise. Hashed transparency turns a fractional
+    # alpha into stochastically-kept pixels: a soft dot whose alpha sits around
+    # ~0.2-0.3 (gaussian ~0.5 * opacity ~0.5) hashes to a scatter of dots that
+    # reads as grey noise. Multiplying by 3.0 and clamping to [0,1] saturates the
+    # central region to 1.0 (so it dithers to a solid core) while the gaussian
+    # tail still drives the edge to 0 — a mostly-opaque soft disc, not noise.
+    boost = nodes.new("ShaderNodeMath")
+    boost.location = (800, 320)
+    boost.operation = "MULTIPLY"
+    boost.inputs[1].default_value = 3.0  # alpha boost so DITHERED reads as solid
+    boost.use_clamp = True  # clamp result to [0,1]
+    links.new(alpha.outputs["Value"], boost.inputs[0])
+
+    # Drive the Principled alpha with the boosted/clamped value; with the
+    # DITHERED render method this hashes the (now solid-cored) soft footprint
+    # without any Mix Shader / OIT.
+    links.new(boost.outputs["Value"], principled.inputs["Alpha"])
 
     return mat
 
@@ -486,6 +507,14 @@ def _ensure_splat_node_group(material: "bpy.types.Material") -> "bpy.types.Geome
     group.interface.new_socket(
         name="Camera", in_out="INPUT", socket_type="NodeSocketObject"
     )
+    # A single global multiplier on every splat's quad size, exposed as a
+    # modifier slider so the user can tame/grow the whole cloud live (without
+    # re-importing) while keeping the per-splat *relative* sizing from
+    # splat_scale. Default 1.0 = use the per-splat scales as-is.
+    size_socket = group.interface.new_socket(
+        name="Splat Size", in_out="INPUT", socket_type="NodeSocketFloat"
+    )
+    size_socket.default_value = 1.0
 
     nodes = group.nodes
     links = group.links
@@ -513,6 +542,18 @@ def _ensure_splat_node_group(material: "bpy.types.Material") -> "bpy.types.Geome
     scale_attr.location = (-400, 180)
     scale_attr.data_type = "FLOAT_VECTOR"
     scale_attr.inputs["Name"].default_value = ATTR_SCALE
+
+    # Global size multiplier: scale the per-splat scale vector by the "Splat
+    # Size" group input (Vector Math SCALE = vector * scalar). Feeding this to
+    # Instance Scale instead of scale_attr directly preserves each splat's
+    # relative/anisotropic size while letting the user grow/shrink the whole
+    # cloud from one slider. The SCALE op's scalar lives on the named "Scale"
+    # input socket, not inputs[1] (which is an unused second Vector).
+    scale_mul = nodes.new("ShaderNodeVectorMath")
+    scale_mul.location = (-160, 180)
+    scale_mul.operation = "SCALE"
+    links.new(scale_attr.outputs["Attribute"], scale_mul.inputs[0])
+    links.new(group_in.outputs["Splat Size"], scale_mul.inputs["Scale"])
 
     # --- Camera-facing rotation chain ---
     # ObjectInfo(Camera, RELATIVE).Location gives the camera position in the
@@ -549,7 +590,7 @@ def _ensure_splat_node_group(material: "bpy.types.Material") -> "bpy.types.Geome
     instance.location = (120, 0)
     links.new(group_in.outputs["Geometry"], instance.inputs["Points"])
     links.new(set_mat.outputs["Geometry"], instance.inputs["Instance"])
-    links.new(scale_attr.outputs["Attribute"], instance.inputs["Scale"])
+    links.new(scale_mul.outputs["Vector"], instance.inputs["Scale"])
     # Euler output implicitly converts to the Rotation socket (same implicit
     # conversion the previous QUATERNION attribute relied on).
     links.new(align.outputs["Rotation"], instance.inputs["Rotation"])
@@ -625,17 +666,22 @@ def import_splat(
     # the socket's display name. Best-effort: a missing camera (camera is None,
     # which is acceptable) or any API-shape difference must not break the import.
     # Re-point this to any camera later by setting the same modifier input.
+    # GN group inputs are addressed on the modifier by the socket *identifier*
+    # (e.g. "Socket_3"), not its name, so resolve each from the group interface
+    # by display name. Defaults: point at the scene camera, Splat Size = 1.0
+    # (use per-splat scales as-is; nudge this slider live to grow/shrink the
+    # whole cloud if it imports too small or too large).
     try:
         camera = getattr(bpy.context.scene, "camera", None)
+        socket_defaults = {"Camera": camera, "Splat Size": 1.0}
         for item in group.interface.items_tree:
-            if (
-                getattr(item, "in_out", None) == "INPUT"
-                and getattr(item, "name", None) == "Camera"
-            ):
-                modifier[item.identifier] = camera
-                break
+            if getattr(item, "in_out", None) != "INPUT":
+                continue
+            name = getattr(item, "name", None)
+            if name in socket_defaults:
+                modifier[item.identifier] = socket_defaults[name]
     except Exception as exc:  # pragma: no cover - defensive, env-dependent
-        print(f"fal.ai: could not wire splat camera input: {exc}")
+        print(f"fal.ai: could not wire splat modifier inputs: {exc}")
 
     # Link into the active collection (fall back to the scene collection).
     collection = getattr(bpy.context, "collection", None) or bpy.context.scene.collection

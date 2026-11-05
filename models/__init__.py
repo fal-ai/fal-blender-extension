@@ -61,6 +61,7 @@ from .mesh_generation import (
 )
 from .video_generation import (
     DepthVideoModel,
+    H3MaxCameraControlVideoModel,
     EdgeVideoModel,
     ImageToVideoModel,
     KlingV3ProImageToVideoModel,
@@ -107,6 +108,7 @@ from .video_processing import SeedVR29BVideoUpscalingModel, VideoUpscalingModel
 __all__ = [
     "AudioFalModel",
     "AuraSRImageUpscalingModel",
+    "H3MaxCameraControlVideoModel",
     "ClarityImageUpscalingModel",
     "DepthGuidedImageGenerationModel",
     "DepthVideoModel",

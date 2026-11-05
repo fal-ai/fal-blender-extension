@@ -1,3 +1,4 @@
+from .camera_controls import H3MaxCameraControlVideoModel
 from .depth_video import (
     DepthVideoModel,
     LTX2DepthVideoModel,
@@ -94,4 +95,6 @@ __all__ = [
     "LTX23ImageToVideoModel",
     "LTX23DistilledImageToVideoModel",
     "Wan27ImageToVideoModel",
+    # Camera Controls
+    "H3MaxCameraControlVideoModel",
 ]

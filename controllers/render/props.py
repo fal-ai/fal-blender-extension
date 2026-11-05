@@ -9,6 +9,7 @@ from ...models import (
     SketchGuidedImageGenerationModel,
 )
 from ..advanced_params import with_advanced_params
+from .camera_path import on_distance_changed, on_image_changed
 
 
 @with_advanced_params
@@ -99,6 +100,11 @@ class FalRenderPropertyGroup(bpy.types.PropertyGroup):
                 "EDGE",
                 "Edge",
                 "Render animation then detect edges for edge-conditioned video",
+            ),
+            (
+                "CAMERA",
+                "Camera Controls",
+                "Animate an image along the scene camera's path",
             ),
         ],
         default="DEPTH",
@@ -362,6 +368,56 @@ class FalRenderPropertyGroup(bpy.types.PropertyGroup):
         default=0,
         min=0,
         max=32,
+    )
+
+    # ── Video: Camera Controls Mode ─────────────────────────────────────
+    camera_image_source: bpy.props.EnumProperty(
+        name="Image",
+        items=[
+            ("FILE", "Image File", "Animate an image from disk"),
+            ("RENDER", "Render First Frame", "Render the scene at the first frame"),
+        ],
+        default="FILE",
+    )
+
+    camera_image_path: bpy.props.StringProperty(
+        name="Image File",
+        description=(
+            "Image to animate. Placed as a card at Subject Distance in front of "
+            "the first-frame camera, and the render resolution is set to its size"
+        ),
+        subtype="FILE_PATH",
+        default="",
+        update=on_image_changed,
+    )
+
+    camera_resolution: bpy.props.EnumProperty(
+        name="Resolution",
+        description="Generation resolution; the aspect ratio follows the image",
+        items=[(r, r, "") for r in ("480P", "768P", "1080P")],
+        default="480P",
+    )
+
+    camera_auto_scale: bpy.props.BoolProperty(
+        name="Auto Scale",
+        description=(
+            "Measure how far the camera is from what it sees at the first frame"
+        ),
+        default=True,
+    )
+
+    camera_subject_distance: bpy.props.FloatProperty(
+        name="Subject Distance",
+        description=(
+            "Distance from the camera to the nearest content in the image, "
+            "in scene units: where the image card sits. Sets how far a camera "
+            "move travels"
+        ),
+        default=5.0,
+        min=0.01,
+        soft_max=100.0,
+        subtype="DISTANCE",
+        update=on_distance_changed,
     )
 
     # ── Video Duration & First Frame ────────────────────────────────────

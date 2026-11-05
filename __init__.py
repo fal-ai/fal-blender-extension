@@ -18,6 +18,7 @@ from .app import (
 )
 from .controllers import FalController
 from .controllers import advanced_params as _advanced_params
+from .controllers.render.camera_path import FAL_OT_MatchModelFov, FAL_OT_PlaceImageCard
 from .job_queue import JobManager
 from .preferences import FAL_OT_OpenOutputFolder, FalPreferences
 
@@ -29,6 +30,8 @@ def register() -> None:
     _branding.register()
     _advanced_params.register()
     bpy.utils.register_class(FAL_OT_OpenOutputFolder)
+    bpy.utils.register_class(FAL_OT_MatchModelFov)
+    bpy.utils.register_class(FAL_OT_PlaceImageCard)
     bpy.utils.register_class(FalPreferences)
     bpy.utils.register_class(FalAI3DSceneProperties)
     bpy.utils.register_class(FalAIVSESceneProperties)
@@ -52,6 +55,8 @@ def unregister() -> None:
     """
     _advanced_params.unregister()
     bpy.utils.unregister_class(FAL_OT_OpenOutputFolder)
+    bpy.utils.unregister_class(FAL_OT_MatchModelFov)
+    bpy.utils.unregister_class(FAL_OT_PlaceImageCard)
     bpy.utils.unregister_class(FalPreferences)
     bpy.utils.unregister_class(FalAI3DSceneProperties)
     bpy.utils.unregister_class(FalAIVSESceneProperties)

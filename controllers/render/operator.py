@@ -19,6 +19,7 @@ from ...models import (
     DepthVideoModel,
     EdgeGuidedImageGenerationModel,
     EdgeVideoModel,
+    H3MaxCameraControlVideoModel,
     ImageRefinementModel,
     SketchGuidedImageGenerationModel,
 )
@@ -40,6 +41,12 @@ from ...utils import (
 )
 from ..advanced_params import get_advanced_params_dict
 from ..operators import FalOperator
+from .camera_path import (
+    camera_problems,
+    near_depth,
+    place_image_card,
+    sample_camera_poses,
+)
 from .utils import (
     calc_scene_depth_bounds,
     get_dimensions,
@@ -100,6 +107,12 @@ class FalRenderOperator(FalOperator):
             elif props.mode == "REFINE":
                 return bool(props.refine_system_prompt.strip() or props.prompt.strip())
             return bool(props.prompt.strip())
+        elif props.video_mode == "CAMERA":
+            if camera_problems(context, H3MaxCameraControlVideoModel):
+                return False
+            return props.camera_image_source == "RENDER" or bool(
+                props.camera_image_path.strip()
+            )
         else:  # VIDEO
             return bool(props.prompt.strip())
 
@@ -114,6 +127,8 @@ class FalRenderOperator(FalOperator):
     def confirm_title(
         cls, context: bpy.types.Context, props: bpy.types.PropertyGroup
     ) -> str:
+        if props.video_mode == "CAMERA":
+            return "Submit the camera path for video generation?"
         mode = "depth" if props.video_mode == "DEPTH" else "edge"
         return f"Render animation and submit for {mode} video generation?"
 
@@ -121,6 +136,15 @@ class FalRenderOperator(FalOperator):
     def confirm_message(
         cls, context: bpy.types.Context, props: bpy.types.PropertyGroup
     ) -> str:
+        if props.video_mode == "CAMERA":
+            scene = context.scene
+            frames = scene.frame_end - scene.frame_start + 1
+            return (
+                f"{H3MaxCameraControlVideoModel.display_name} — "
+                f"{_get_scene_duration(scene):.1f}s, {frames} camera poses, "
+                f"{props.camera_resolution}. The fal.ai job will incur a "
+                "charge on your account."
+            )
         if props.video_mode == "DEPTH":
             model = DEPTH_VIDEO_MODELS.get(props.depth_video_endpoint)
         else:
@@ -250,6 +274,12 @@ class FalRenderOperator(FalOperator):
                 self.report({"ERROR"}, f"Render setup failed: {e}")
                 return {"CANCELLED"}
 
+        elif props.video_mode == "CAMERA":
+            self._video_mode = "CAMERA"
+            result = self._setup_camera_video(context, props)
+            if result is not None:
+                return result
+
         else:  # VIDEO
             self._video_mode = props.video_mode
             self._animation = True
@@ -369,6 +399,10 @@ class FalRenderOperator(FalOperator):
                 self._finish_refine(context)
             return {"FINISHED"}
         else:  # VIDEO
+            if self._video_mode == "CAMERA":
+                self._cleanup_modal(context)
+                self._finish_camera_video(context)
+                return {"FINISHED"}
             if self._video_mode == "DEPTH":
                 self._cleanup_modal(context)
                 self._finish_depth_video(context)
@@ -1254,6 +1288,102 @@ class FalRenderOperator(FalOperator):
         JobManager.get().submit(job)
         self.report({"INFO"}, "Edge video encoded — generating video...")
 
+    # ── Camera Video Mode — setup / finish ────────────────────────────
+
+    def _setup_camera_video(
+        self, context: bpy.types.Context, props: bpy.types.PropertyGroup
+    ) -> set[str] | None:
+        """Sample the camera path, then submit (image file) or start the
+        first-frame render (returns None so the caller enters the modal)."""
+        scene = context.scene
+        self._model = H3MaxCameraControlVideoModel
+        self._camera_resolution = props.camera_resolution
+        self._duration = _get_scene_duration(scene)
+        self._saved["frame_current"] = scene.frame_current
+        try:
+            scene.frame_set(scene.frame_start)
+            if props.camera_image_source == "FILE":
+                # The image card sits at Subject Distance: it is the subject.
+                depth = props.camera_subject_distance
+                place_image_card(scene, props)
+            elif props.camera_auto_scale:
+                depth = near_depth(scene, context.evaluated_depsgraph_get())
+                if depth is None or depth <= 0:
+                    raise RuntimeError(
+                        "nothing in front of the camera at the first frame. "
+                        "Turn off Auto Scale and set Subject Distance"
+                    )
+            else:
+                depth = props.camera_subject_distance
+            print(f"fal.ai: Camera subject distance {depth:.3f} scene units")
+            self._camera_poses_scale = 1.0 / depth
+            self._camera_poses = sample_camera_poses(scene)
+            scene.frame_set(scene.frame_start)
+            if props.camera_image_source == "RENDER":
+                self._setup_refine(context)
+                return None
+            self._restore_state(context)
+            image_url = upload_file(bpy.path.abspath(props.camera_image_path))
+            self._submit_camera_video(context, image_url)
+            return {"FINISHED"}
+        except Exception as e:
+            self._restore_state(context)
+            self.report({"ERROR"}, f"Camera video failed: {e}")
+            return {"CANCELLED"}
+
+    def _finish_camera_video(self, context: bpy.types.Context) -> None:
+        """Upload the first-frame render and submit the camera path."""
+        render_img = bpy.data.images.get("Render Result")
+        if not render_img or not render_img.has_data:
+            self._restore_state(context)
+            self.report({"ERROR"}, "Render failed — no image data")
+            return
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".png", delete=False, prefix="fal_camera_"
+        ).name
+        try:
+            render_img.save_render(tmp)
+        except RuntimeError as e:
+            self._restore_state(context)
+            self.report({"ERROR"}, f"Failed to save render: {e}")
+            return
+        self._restore_state(context)
+        self._submit_camera_video(context, upload_file(tmp))
+
+    def _submit_camera_video(self, context: bpy.types.Context, image_url: str) -> None:
+        args = self._model.parameters(
+            prompt=self._prompt.strip(),
+            enable_prompt_expansion=self._expand_prompt,
+            image_url=image_url,
+            width=self._render_w,
+            height=self._render_h,
+            duration=self._duration,
+            resolution=self._camera_resolution,
+            camera_poses=self._camera_poses,
+            camera_poses_scale=self._camera_poses_scale,
+        )
+        args = self._merge_advanced_params(args)
+
+        render_w, render_h = self._render_w, self._render_h
+        origin_scene = context.scene
+
+        def on_complete(job: FalJob) -> None:
+            _handle_video_result(
+                job,
+                target_width=render_w,
+                target_height=render_h,
+                scene=origin_scene,
+            )
+
+        job = FalJob(
+            endpoint=self._model.endpoint,
+            arguments=args,
+            on_complete=on_complete,
+            label=f"Camera Video: {self._prompt[:30]}",
+        )
+        JobManager.get().submit(job)
+        self.report({"INFO"}, "Camera path submitted — generating video...")
+
     # ── First frame capture (for video modes) ─────────────────────────
 
     def _capture_first_frame(self) -> str | None:
@@ -1331,6 +1461,8 @@ class FalRenderOperator(FalOperator):
             scene.render.resolution_y = s["res_y"]
         if "res_pct" in s:
             scene.render.resolution_percentage = s["res_pct"]
+        if "frame_current" in s:
+            scene.frame_set(s["frame_current"])
         if "use_compositing" in s:
             scene.render.use_compositing = s["use_compositing"]
         # Blender 4.x only: restore use_nodes (deprecated in 5.x)

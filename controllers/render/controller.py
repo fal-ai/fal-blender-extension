@@ -3,11 +3,13 @@ from ...models import (
     DepthVideoModel,
     EdgeGuidedImageGenerationModel,
     EdgeVideoModel,
+    H3MaxCameraControlVideoModel,
     ImageRefinementModel,
     SketchGuidedImageGenerationModel,
 )
 from ..base import FalController
 from ..ui import FalControllerPanel
+from .camera_path import draw_camera_checks
 from .operator import FalRenderOperator
 from .props import FalRenderPropertyGroup
 
@@ -66,6 +68,24 @@ def _video_mode(mode):
     return check
 
 
+def _video_not_camera(context, props) -> bool:
+    return props.render_type == "VIDEO" and props.video_mode != "CAMERA"
+
+
+class _RenderPanel(FalControllerPanel):
+    """Camera Controls has one model, so no endpoint dropdown to resolve."""
+
+    def _get_active_model(self, context, props):
+        if _video_mode("CAMERA")(context, props):
+            return H3MaxCameraControlVideoModel
+        return super()._get_active_model(context, props)
+
+    def draw_status(self, layout, context, props) -> None:
+        super().draw_status(layout, context, props)
+        if _video_mode("CAMERA")(context, props):
+            draw_camera_checks(layout, context, props, H3MaxCameraControlVideoModel)
+
+
 class FalRenderController(FalController):
     """Controller for rendering workflows via fal.ai."""
 
@@ -74,7 +94,7 @@ class FalRenderController(FalController):
     icon = "RENDER_RESULT"
     operator_class = FalRenderOperator
     properties_class = FalRenderPropertyGroup
-    panel_3d = FalControllerPanel(
+    panel_3d = _RenderPanel(
         field_orders=[
             "render_type",
             # Image-specific
@@ -105,6 +125,11 @@ class FalRenderController(FalController):
             "depth_video_endpoint",
             "edge_video_endpoint",
             "edge_parallel_threads",
+            "camera_image_source",
+            "camera_image_path",
+            "camera_resolution",
+            "camera_auto_scale",
+            "camera_subject_distance",
             "use_scene_duration",
             "duration",
             "video_use_first_frame",
@@ -124,16 +149,18 @@ class FalRenderController(FalController):
             "mode": _is_image,
             "seed": _is_image,
             "video_mode": _is_video,
-            "use_scene_duration": _is_video,
-            "duration": lambda context, props: props.render_type == "VIDEO"
+            "use_scene_duration": _video_not_camera,
+            "duration": lambda context, props: _video_not_camera(context, props)
             and not props.use_scene_duration,
-            "video_use_first_frame": _is_video,
-            "video_image_source": lambda context, props: props.render_type == "VIDEO"
+            "video_use_first_frame": _video_not_camera,
+            "video_image_source": lambda context, props: _video_not_camera(
+                context, props
+            )
             and props.video_use_first_frame,
-            "video_image_path": lambda context, props: props.render_type == "VIDEO"
+            "video_image_path": lambda context, props: _video_not_camera(context, props)
             and props.video_use_first_frame
             and props.video_image_source == "FILE",
-            "video_texture": lambda context, props: props.render_type == "VIDEO"
+            "video_texture": lambda context, props: _video_not_camera(context, props)
             and props.video_use_first_frame
             and props.video_image_source == "TEXTURE",
             # Image mode endpoints
@@ -162,12 +189,31 @@ class FalRenderController(FalController):
             "depth_video_endpoint": _video_mode("DEPTH"),
             "edge_video_endpoint": _video_mode("EDGE"),
             "edge_parallel_threads": _video_mode("EDGE"),
+            "camera_image_source": _video_mode("CAMERA"),
+            "camera_image_path": lambda context, props: _video_mode("CAMERA")(
+                context, props
+            )
+            and props.camera_image_source == "FILE",
+            "camera_resolution": _video_mode("CAMERA"),
+            "camera_auto_scale": lambda context, props: _video_mode("CAMERA")(
+                context, props
+            )
+            and props.camera_image_source == "RENDER",
+            "camera_subject_distance": lambda context, props: _video_mode("CAMERA")(
+                context, props
+            )
+            and (props.camera_image_source == "FILE" or not props.camera_auto_scale),
             # Common conditional fields
             "enable_prompt_expansion": lambda context, props: not (
                 props.render_type == "IMAGE" and props.mode == "SKETCH"
             ),
-            "width": lambda context, props: not props.use_scene_resolution,
-            "height": lambda context, props: not props.use_scene_resolution,
+            "use_scene_resolution": lambda context, props: not _video_mode("CAMERA")(
+                context, props
+            ),
+            "width": lambda context, props: not props.use_scene_resolution
+            and not _video_mode("CAMERA")(context, props),
+            "height": lambda context, props: not props.use_scene_resolution
+            and not _video_mode("CAMERA")(context, props),
         },
         field_groupings=[
             {"width", "height"},

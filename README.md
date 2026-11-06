@@ -156,7 +156,7 @@ Renders the scene normally and refines the result with img2img or an edit model.
 
 https://github.com/user-attachments/assets/5645a408-225b-4d67-b1f6-934c456d5f2a
 
-Same controller as image rendering, but the mode switcher is set to **Video**. Renders an animation sequence as depth or edges, then generates a video conditioned on that sequence.
+Same controller as image rendering, but the mode switcher is set to **Video**. Renders an animation sequence as depth or edges, then generates a video conditioned on that sequence, or animates an image along the scene camera's path.
 
 *Note: The above video has processing time truncated.*
 
@@ -183,6 +183,19 @@ Canny edges are computed per frame (in parallel threads) and fed to the model as
 | [LTX-2 19B Distilled](https://fal.ai/models/fal-ai/ltx-2-19b/distilled/video-to-video) | Open-weight, faster |
 | [LTX 2.3 22B Ref V2V](https://fal.ai/models/fal-ai/ltx-2.3-22b/reference-video-to-video) | Supports a reference image |
 | [LTX 2.3 22B Distilled Ref V2V](https://fal.ai/models/fal-ai/ltx-2.3-22b/distilled/reference-video-to-video) | Distilled, with reference image |
+
+#### Camera Controls
+
+Animates one image along the scene camera's path: the camera's pose at every frame of the scene range is sent with the image, and the model renders the move. Nothing else in the scene is sent.
+
+- **Image File** (default): pick a photo. It appears as an image card (preview only, never rendered) filling the first-frame camera view at **Subject Distance**, so playback previews the move, and the render resolution is set to the image size. Your camera path is never changed.
+- **Render First Frame**: renders the scene at the first frame and animates that render. **Auto Scale** measures the distance to what the camera sees.
+- **Subject Distance** sets how far a move travels: the model's unit of distance is the distance to the nearest content in the image.
+- The model assumes a 64° horizontal field of view; the panel offers a one-click lens fix when the camera differs by more than 5°.
+
+| Endpoint | Notes |
+|----------|-------|
+| [MiniMax H3 Max Camera Controls](https://fal.ai/models/minimax/h3-max/camera-controls) | 1–15 s, 480P / 768P / 1080P; aspect follows the image |
 
 Video results import into the Video Sequence Editor. The addon auto-disables `scene.render.use_sequencer` so F12 keeps rendering the 3D view, and pops up a notification when the clip lands.
 
@@ -354,7 +367,7 @@ controllers/          Blender-side workflows (UI, operators, properties)
   audio/              TTS (preset + clone), SFX, Music (VSE)
   generate_3d/        Text/Image-to-3D (3D Viewport)
   material/           Text-to-Material, Image-to-Maps, Tiling (3D Viewport)
-  render/             Depth / Edge / Sketch / Refine modes + Video (3D Viewport)
+  render/             Depth / Edge / Sketch / Refine modes + Video incl. Camera (3D Viewport)
   upscale/            Image and video upscaling (shared: 3D + VSE)
   video/              Text/Image-to-Video (VSE)
 
@@ -365,7 +378,7 @@ models/               fal.ai endpoint definitions and parameter builders
   image_processing/   Image upscaling
   material_generation/ Material, PBR estimation, tiling
   mesh_generation/    Text-to-3D, image-to-3D
-  video_generation/   Text/image-to-video, depth/edge video
+  video_generation/   Text/image-to-video, depth/edge video, camera controls
   video_processing/   Video upscaling
 
 app.py                Panel registration for 3D and VSE sidebars
